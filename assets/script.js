@@ -1,5 +1,3 @@
-/* script.js - Complete Version (v3.3 - Matrix Logic Updated) */
-
 // --- GLOBAL VARIABLES ---
 let projects = [];
 let activeProjectIdx = 0;
@@ -335,6 +333,7 @@ function goToPreview() {
     jumpToStep(2);
 }
 
+// UPDATE: Delete Button moved to start (left)
 function renderPreviewTables() {
     const p = projects[activeProjectIdx];
     if(!p.dataA || !p.dataB) return;
@@ -349,14 +348,18 @@ function renderSinglePreview(tableId, countId, data, side) {
     
     countSpan.innerText = data.body.length;
     
-    let html = "<thead><tr><th>#</th>";
+    // Header: Added 'Action' at the START
+    let html = "<thead><tr><th>Action</th><th>#</th>";
     data.headers.forEach(h => html += `<th>${h}</th>`);
-    html += "<th>Action</th></tr></thead><tbody>";
+    html += "</tr></thead><tbody>";
     
     data.body.forEach((row, idx) => {
-        html += `<tr><td>${idx+1}</td>`;
+        html += `<tr>`;
+        // Body: Added Delete Button at the START
+        html += `<td><button class="btn-del" onclick="deleteRow('${side}', ${idx})">Delete</button></td>`;
+        html += `<td>${idx+1}</td>`;
         row.forEach(cell => html += `<td>${cell}</td>`);
-        html += `<td><button class="btn-del" onclick="deleteRow('${side}', ${idx})">Delete</button></td></tr>`;
+        html += `</tr>`;
     });
     html += "</tbody>";
     
@@ -559,17 +562,36 @@ function mapKey(label) {
 
 // --- END NEW MATRIX LOGIC ---
 
+// UPDATE: Fixed "SIZE" data loss issue & Added Qty check
 function autoCleanData(data) { 
     if (!data || !data.body) return; 
     
-    // Filter empty rows
+    // 1. Identify Quantity Columns
+    const qtyIndices = [];
+    data.headers.forEach((h, i) => {
+        // Matches "qty", "quantity", "total qty", "total quantity" (Case Insensitive)
+        if (/^(qty|quantity|total\s*qty|total\s*quantity)$/i.test(h.trim())) {
+            qtyIndices.push(i);
+        }
+    });
+
+    // 2. Filter Rows
     data.body = data.body.filter(row => { 
+        // A. Delete Empty Rows
         const hasContent = row.some(cell => cell && cell.toString().trim() !== ""); 
         if (!hasContent) return false; 
         
-        // Only filter explicit garbage header repeats
-        const isHeaderRepeat = row.some(c => c.toString().includes("SIZE") || c.toString().includes("UPC") || c.toString().includes("(optional)"));
+        // B. Delete Garbage Headers (Removed "SIZE" to prevent data loss)
+        const isHeaderRepeat = row.some(c => c.toString().includes("UPC") || c.toString().includes("(optional)"));
         if (isHeaderRepeat) return false;
+
+        // C. Delete if Quantity is 0 or Blank
+        // Only runs if a 'Quantity' column was actually found
+        for (let idx of qtyIndices) {
+            const val = (row[idx] || "").toString().trim();
+            // Delete if blank or explicitly "0"
+            if (val === "" || val === "0") return false; 
+        }
 
         return true; 
     }); 
@@ -741,32 +763,42 @@ function saveMappingFromUI() {
     }); 
 }
 
+// UPDATE: Added saving and redirect to Overview
 function runAllComparisons() { 
-    let processed = 0; 
-    projects.forEach(p => { 
-        if (p.status !== 'empty') { 
-            if(!p.dataA && p.rawA) { 
-                p.dataA = parseExcelData(p.rawA, document.getElementById('headerModeA').value || "1row"); 
-                p.dataB = parseExcelData(p.rawB, document.getElementById('headerModeB').value || "1row"); 
-                autoCleanData(p.dataA); 
-                autoCleanData(p.dataB); 
-            } 
-            if(p.dataA && p.dataB) { 
+    // CRITICAL FIX: Save the data currently on the screen before running
+    saveCurrentViewToProject(); 
+
+    let processed = 0;
+    // Get header modes from UI (defaults to 1row if missing)
+    const modeA = document.getElementById('headerModeA').value || "1row";
+    const modeB = document.getElementById('headerModeB').value || "1row";
+
+    projects.forEach(p => {
+        // Check if raw data exists. If it does, ensure it is parsed.
+        if (p.rawA && p.rawB) {
+            if (!p.dataA || !p.dataB) {
+                p.dataA = parseExcelData(p.rawA, modeA);
+                p.dataB = parseExcelData(p.rawB, modeB);
+                autoCleanData(p.dataA);
+                autoCleanData(p.dataB);
+            }
+
+            // Perform the mapping and mark as done
+            if (p.dataA && p.dataB) {
                 autoMapProject(p); 
                 p.status = 'done'; 
                 p.step = 4; 
                 processed++; 
-            } 
-        } 
-    }); 
-    if (processed === 0) { 
-        alert("No sets with data found."); 
-    } else { 
-        alert(`Processed ${processed} sets.`); 
-        renderTopBar(); 
-        showOverview(); 
-        renderDashboard(); 
-    } 
+            }
+        }
+    });
+
+    if (processed === 0) {
+        alert("No sets with data found. Please paste data first.");
+    } else {
+        renderTopBar();
+        showOverview(); // <--- This commands the switch to Overview
+    }
 }
 
 function autoMapProject(p) { 
