@@ -694,6 +694,168 @@ function saveCurrentViewToProject() {
     }
 }
 
+
+// =========================================
+// MATRIX EXTRACTION & UI FUNCTIONS (RESTORED)
+// =========================================
+
+// 1. Scan ABOVE the table for Matrix Keys
+function extractMatrixData(data, endRow) {
+    const matrix = [];
+    // KEYWORDS MUST BE UPPERCASE to match correctly
+    const keywords = [
+        "ADAPTIVE", "UPF", "LYCRA", "SUSTAINABILITY",
+        "SKU", "DEPT", "MAJOR CLASS", "SUB CLASS",
+        "DESCRIPTION", "OPTIONS", 
+        "GOTS INFO", "GOTS ICON" 
+    ];
+
+    for (let i = 0; i < endRow; i++) {
+        const row = data[i];
+        if (!row) continue;
+
+        for (let c = 0; c < row.length; c++) {
+            const cell = String(row[c] || "").trim();
+            if (!cell) continue;
+
+            const upperCell = cell.toUpperCase();
+
+            // --- IGNORE RULES ---
+            if (upperCell.includes("INSTRUCTION")) continue;
+            if (upperCell.includes("FEATURE OPTION")) continue;
+            if (upperCell.includes("FEATURES OPTION")) continue;
+            if (upperCell.includes("DRAW FROM BULK")) continue;
+            // --------------------
+
+            const matchedKeyword = keywords.find(k => upperCell.includes(k));
+
+            if (matchedKeyword) {
+                let candidateVal = "";
+                let foundVal = false;
+
+                // 1. Look Right
+                if (row[c+1] && String(row[c+1]).trim() !== "") {
+                    candidateVal = String(row[c+1]).trim();
+                    foundVal = true;
+                } 
+                // 2. Look Skip-Right (merged cells)
+                else if (row[c+2] && String(row[c+2]).trim() !== "") {
+                    candidateVal = String(row[c+2]).trim();
+                    foundVal = true;
+                }
+
+                // CHECK: Is the "Value" actually just another "Label"?
+                let isNextLabel = false;
+                if (foundVal) {
+                    const hasKeyword = keywords.some(k => candidateVal.toUpperCase().includes(k));
+                    if (hasKeyword) {
+                        if (candidateVal.includes("(") || candidateVal.includes("\n") || candidateVal.toUpperCase().includes("INSTRUCTION")) {
+                            isNextLabel = true;
+                        }
+                    }
+                }
+
+                const finalVal = isNextLabel ? "" : candidateVal;
+                const cleanKey = cell.replace(/[\r\n]+/g, " ").trim();
+                
+                // Prevent duplicates
+                if (!matrix.some(m => m.key === cleanKey)) {
+                    matrix.push({ key: cleanKey, val: finalVal });
+                }
+            }
+        }
+    }
+    return matrix;
+}
+
+// 2. Parse the text from the Input Box
+function parseMatrixString(rawString) {
+    if (!rawString) return [];
+    const rows = [];
+    const rawLines = rawString.split(/\n/); 
+    
+    rawLines.forEach(line => {
+        // SAFETY FIX: Remove parentheses content BEFORE finding the colon
+        let cleanLine = line.replace(/\(.*?\)/g, "").trim(); 
+
+        let k = "", v = "";
+        
+        if (cleanLine.includes(":")) {
+            let idx = cleanLine.indexOf(":");
+            k = cleanLine.substring(0, idx);
+            v = cleanLine.substring(idx+1);
+        } else {
+            k = cleanLine; 
+        }
+
+        // Cleanup
+        k = k.replace(/"/g, "");
+        k = k.replace(/\s+/g, " ").trim();
+        v = v ? v.trim() : "";
+
+        // Standardize
+        const upperK = k.toUpperCase();
+        if (upperK.includes("ADAPTIVE")) k = "ADAPTIVE";
+        else if (upperK.includes("UPF")) k = "UPF";
+        else if (upperK.includes("LYCRA")) k = "LYCRA";
+        else if (upperK.includes("SUSTAINABILITY")) k = "SUSTAINABILITY";
+        else if (upperK.includes("SKU")) k = "SKU#";
+        else if (upperK.includes("GOTS INFO")) k = "GOTS INFO";
+        else if (upperK.includes("GOTS ICON")) k = "GOTS Icon";
+        
+        if (k) rows.push({ key: k, val: v });
+    });
+    return rows;
+}
+
+// 3. UI Helpers
+function autoParseMatrix() {
+    const raw = document.getElementById("matrixRawInput").value;
+    if (!raw.trim()) return;
+    const rawLines = raw.split(/\r?\n/);
+    const rows = [];
+    let buffer = "";
+    rawLines.forEach(line => {
+        const l = line.trim();
+        if (!l) return;
+        buffer += (buffer ? " " : "") + l;
+        if (!l.startsWith('"') || l.endsWith('"') || (buffer.startsWith('"') && buffer.includes('"', 1))) {
+            rows.push(buffer); buffer = "";
+        }
+    });
+    document.getElementById("matrixList").innerHTML = "";
+    rows.forEach(row => {
+        let k, v;
+        if (row.includes("\t")) {
+            [k, v] = row.split("\t");
+        } else if (row.includes(":")) {
+            let idx = row.indexOf(":");
+            k = row.substring(0, idx);
+            v = row.substring(idx+1);
+        } else if (row.includes("=")) { 
+            let idx = row.indexOf("=");
+            k = row.substring(0, idx);
+            v = row.substring(idx+1);
+        } else {
+            k = row;
+            v = "";
+        }
+        addMatrixRow(mapKey(cleanLabel(k || "")), normalizeValue(v || ""));
+    });
+}
+
+function addMatrixRow(key = "", val = "") { 
+    const div = document.createElement('div'); div.className = 'matrix-row-item'; 
+    div.innerHTML = `<input type="text" class="matrix-input m-key" placeholder="Field" value="${key}"><input type="text" class="matrix-input m-val" placeholder="Value" value="${val}"><button class="btn-x" onclick="this.parentElement.remove()">×</button>`; 
+    document.getElementById('matrixList').appendChild(div); 
+}
+
+function toggleMatrix() { 
+    const sec = document.getElementById('matrixSection'), btn = document.getElementById('btnToggleMatrix'); 
+    if (sec.style.display === 'none') { sec.style.display = 'block'; btn.innerHTML = `<i class="fas fa-minus-circle"></i> Hide Matrix Rules`; } 
+    else { sec.style.display = 'none'; btn.innerHTML = `<i class="fas fa-plus-circle"></i> Show Matrix Rules (Optional)`; } 
+}
+
 function getMatrixDataFromUI() {
     const rows = document.querySelectorAll('.matrix-row-item'); 
     const data = [];
@@ -703,6 +865,19 @@ function getMatrixDataFromUI() {
         if(k) data.push({key: k, val: v});
     });
     return data;
+}
+
+// 4. String Cleaners
+function cleanLabel(text) { return text.replace(/"/g, "").replace(/\(.*?\)/g, "").replace(/\s+/g, " ").trim(); }
+function normalizeValue(val) { return val ? val.trim() : ""; }
+function mapKey(label) {
+    const L = label.toUpperCase();
+    if (L.startsWith("ADAPTIVE")) return "ADAPTIVE";
+    if (L.startsWith("UPF")) return "UPF";
+    if (L.startsWith("LYCRA")) return "LYCRA";
+    if (L.startsWith("SUSTAINABILITY")) return "SUSTAINABILITY";
+    if (L.startsWith("SKU")) return "SKU#";
+    return label;
 }
 
 function loadProjectIntoView(idx) {
@@ -1906,86 +2081,7 @@ function findHeaderRowIndex(data) {
     return -1;
 }
 
-function extractMatrixData(data, endRow) {
-    const matrix = [];
-    const keywords = [
-        "ADAPTIVE", "UPF", "LYCRA", "SUSTAINABILITY",
-        "SKU", "DEPT", "MAJOR CLASS", "SUB CLASS",
-        "DESCRIPTION", "OPTIONS", 
-        "GOTS INFO", "GOTS ICON" 
-    ];
 
-    for (let i = 0; i < endRow; i++) {
-        const row = data[i];
-        if (!row) continue;
-
-        for (let c = 0; c < row.length; c++) {
-            const cell = String(row[c] || "").trim();
-            if (!cell) continue;
-
-            const upperCell = cell.toUpperCase();
-            if (upperCell.includes("INSTRUCTION")) continue;
-            if (upperCell.includes("DRAW FROM BULK")) continue;
-
-            const matchedKeyword = keywords.find(k => upperCell.includes(k));
-
-            if (matchedKeyword) {
-                let candidateVal = "";
-                let foundVal = false;
-
-                if (row[c+1] && String(row[c+1]).trim() !== "") {
-                    candidateVal = String(row[c+1]).trim();
-                    foundVal = true;
-                } 
-                else if (row[c+2] && String(row[c+2]).trim() !== "") {
-                    candidateVal = String(row[c+2]).trim();
-                    foundVal = true;
-                }
-
-                let isNextLabel = false;
-                if (foundVal) {
-                    const hasKeyword = keywords.some(k => candidateVal.toUpperCase().includes(k));
-                    if (hasKeyword) {
-                        if (candidateVal.includes("(") || candidateVal.includes("\n") || candidateVal.toUpperCase().includes("INSTRUCTION")) {
-                            isNextLabel = true;
-                        }
-                    }
-                }
-
-                const finalVal = isNextLabel ? "" : candidateVal;
-                const cleanKey = cell.replace(/[\r\n]+/g, " ").trim();
-                
-                if (!matrix.some(m => m.key === cleanKey)) {
-                    matrix.push({ key: cleanKey, val: finalVal });
-                }
-            }
-        }
-    }
-    return matrix;
-}
-
-function parseMatrixString(rawString) {
-    if (!rawString) return [];
-    const rows = [];
-    rawString.split(/\n/).forEach(line => {
-        let cleanLine = line.replace(/\(.*?\)/g, "").trim(); 
-        let k = "", v = "";
-        
-        if (cleanLine.includes(":")) { 
-            let idx = cleanLine.indexOf(":"); 
-            k = cleanLine.substring(0, idx); 
-            v = cleanLine.substring(idx+1); 
-        } else { 
-            k = cleanLine; 
-        }
-        
-        k = k.replace(/"/g, "").replace(/\s+/g, " ").trim(); 
-        v = v ? v.trim() : "";
-        
-        if (k) rows.push({ key: k, val: v });
-    });
-    return rows;
-}
 
 function getVisualDiff(mainText, compareText) {
     if (!mainText) return ""; 
@@ -2126,32 +2222,7 @@ function cleanHeader(text) {
     return clean;
 }
 
-function addMatrixRow(key = "", val = "") { 
-    const div = document.createElement('div'); 
-    div.className = 'matrix-row-item'; 
-    div.innerHTML = `
-        <input type="text" class="matrix-input m-key" placeholder="Field" value="${key}">
-        <input type="text" class="matrix-input m-val" placeholder="Value" value="${val}">
-        <button class="btn-x" onclick="this.parentElement.remove()">×</button>`; 
-    document.getElementById('matrixList').appendChild(div); 
-}
 
-function toggleMatrix() { 
-    const sec = document.getElementById('matrixSection');
-    const btn = document.getElementById('btnToggleMatrix'); 
-    if (sec.style.display === 'none') { 
-        sec.style.display = 'block'; 
-        btn.innerHTML = `<i class="fas fa-minus-circle"></i> Hide Matrix Rules`; 
-    } else { 
-        sec.style.display = 'none'; 
-        btn.innerHTML = `<i class="fas fa-plus-circle"></i> Show Matrix Rules (Optional)`; 
-    } 
-}
-
-function autoParseMatrix() {
-    document.getElementById("matrixList").innerHTML = "";
-    parseMatrixString(document.getElementById("matrixRawInput").value).forEach(m => addMatrixRow(m.key, m.val));
-}
 
 function showToast(msg) {
     const t = document.getElementById('toast'); 
