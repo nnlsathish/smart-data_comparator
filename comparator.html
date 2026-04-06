@@ -34,7 +34,7 @@
 
 <div class="app-layout">
     
-    <aside class="sidebar">
+    <aside class="sidebar collapsed">
         <div class="sidebar-header">
             <i class="fas fa-layer-group"></i>
             <h3>Comparator Tool</h3>
@@ -68,6 +68,10 @@
     <div class="main-wrapper">
         
         <header class="top-bar">
+            <button id="sidebarToggle" onclick="toggleSidebar()" style="background:none; border:none; color:#475569; font-size:20px; cursor:pointer; margin-right:15px; padding:5px; transition: color 0.2s;">
+    <i class="fas fa-chevron-right"></i>
+</button>
+
             <div class="tabs-container">
                 <div class="tab-item" id="tabOverview" onclick="showOverview()">
                     <i class="fas fa-th-large"></i> Overview
@@ -108,7 +112,7 @@
                                 <th>Set Name</th>
                                 <th>Status</th>
                                 <th>Form Rows</th>
-                                <th>Sainpase Rows</th>
+                                <th>CPQ/Sainpase Rows</th>
                                 <th>Matches</th>
                                 <th>Mismatches</th>
                                 <th>Action</th>
@@ -132,47 +136,70 @@
                     </div>
                 </div>
 
-                <div class="input-grid-container">
-                    <div class="tables-row">
-                        <div class="input-card" id="cardSource">
-                            <div class="card-head blue-head">
-    <div style="display:flex; align-items:center; gap:10px;">
-        <label id="lblSource">Table 1 — Form Data</label>
-        
-        <label class="mini-upload-btn">
-            <i class="fas fa-file-excel"></i> Upload Excel
-            <input type="file" id="bulkUpload" accept=".xlsx, .xls, .csv" multiple onchange="handleBulkUpload(this)" hidden>
-        </label>
-    </div>
+                <div class="tables-row">
+                        
+                        <div class="input-card" id="cardSource" style="display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-head blue-head" style="display:flex; justify-content:space-between; align-items:center;">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <label id="lblSource" style="font-weight:bold; font-size:14px; margin:0;">Table 1 — Form Data</label>
+                                    <label class="mini-upload-btn" style="margin:0;">
+                                        <i class="fas fa-file-excel"></i> Upload Excel
+                                        <input type="file" id="bulkUpload" accept=".xlsx, .xls, .csv" multiple onchange="handleBulkUpload(this)" hidden>
+                                    </label>
+                                </div>
+                                <div class="toggle-group" id="groupModeA">
+                                    <button class="toggle-btn active" data-val="1row" onclick="setMode('A', '1row')">1 Row Header</button>
+                                    <button class="toggle-btn" data-val="2rows" onclick="setMode('A', '2rows')">Multi-Row</button>
+                                </div>
+                                <input type="hidden" id="headerModeA" value="1row">
+                            </div>
+                            
+                            <div style="background:#f8fafc; border-bottom:1px solid #e2e8f0; padding:6px 15px; display:flex; justify-content:flex-start; align-items:center; gap:15px;">
+                                <label style="font-size: 11px; cursor: pointer; color: #475569; display: flex; align-items: center; gap: 5px; font-weight:600;" title="Sort sheets A-Z">
+                                    <input type="checkbox" id="sortSheetsToggle"> Sort Sheets A-Z
+                                </label>
+                                
+                                <div style="width:1px; height:14px; background:#cbd5e1;"></div> <div style="display:flex; align-items:center;">
+                                    <input type="text" id="customQtyKey" placeholder="Qty Keyword (e.g. 'Order Qty')" 
+                                           style="font-size:11px; padding:3px 8px; border:1px solid #cbd5e1; border-radius:3px 0 0 3px; color:#1e3a8a; width:160px; outline:none; border-right:none;" 
+                                           title="Type a unique column header name to help find the table.">
+                                    <button onclick="retryWithKeyword()" 
+                                            style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; padding:3px 10px; border-radius:0 3px 3px 0; font-size:10px; cursor:pointer; font-weight:bold; transition: background 0.2s;"
+                                            onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">
+                                        APPLY
+                                    </button>
+                                </div>
 
-    <div class="toggle-group" id="groupModeA">
-        <button class="toggle-btn active" data-val="1row" onclick="setMode('A', '1row')">1 Row Header</button>
-        <button class="toggle-btn" data-val="2rows" onclick="setMode('A', '2rows')">Multi-Row</button>
-    </div>
-    <input type="hidden" id="headerModeA" value="1row">
-</div>
-                            <textarea id="tableA" placeholder="Paste form data/Upload Excel here..."></textarea>
+                                <div style="width:1px; height:14px; background:#cbd5e1;"></div> <button onclick="reselectCurrentTable()" 
+                                    style="background:none; border:none; color:#475569; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:5px; padding:3px 6px; border-radius:3px;" 
+                                    onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='none'"
+                                    title="Manually pick the table area">
+                                    <i class="fas fa-crop-alt"></i> Manual Select
+                                </button>
+                            </div>
+                            
+                            <textarea id="tableA" placeholder="Paste form data/Upload Excel here..." style="flex: 1; border:none; outline:none; padding:15px; resize:none; margin:0;"></textarea>
                         </div>
                         
-                        <div class="input-card" id="cardTarget">
-                            <div class="card-head green-head">
+                        <div class="input-card" id="cardTarget" style="display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-head green-head" style="display:flex; justify-content:space-between; align-items:center;">
                                 <div style="display:flex; align-items:center; gap:10px;">
-                                    <label id="lblTarget">Table 2 — Sainpase Data</label>
-                                    
-                                    <label class="mini-upload-btn">
+                                    <label id="lblTarget" style="font-weight:bold; font-size:14px; margin:0;">Table 2 — Sainpase Data</label>
+                                    <label class="mini-upload-btn" style="margin:0;">
                                         <i class="fas fa-file-excel"></i> Upload CPQ Excel
                                         <input type="file" id="uploadSainpase" accept=".xlsx, .xls, .csv" multiple onchange="handleCPQUpload(this)" hidden>
                                     </label>
                                 </div>
-
                                 <div class="toggle-group" id="groupModeB">
                                     <button class="toggle-btn active" data-val="1row" onclick="setMode('B', '1row')">1 Row Header</button>
                                     <button class="toggle-btn" data-val="2rows" onclick="setMode('B', '2rows')">Multi-Row</button>
                                 </div>
                                 <input type="hidden" id="headerModeB" value="1row">
                             </div>
-                            <textarea id="tableB" placeholder="Paste Sainpase/CPQ Data... or Drag & Drop Excel File Here"></textarea>
+                            
+                            <textarea id="tableB" placeholder="Paste Sainpase/CPQ Data... or Drag & Drop Excel File Here" style="flex: 1; border:none; outline:none; padding:15px; resize:none; margin:0;"></textarea>
                         </div>
+
                     </div>
                     
                     <button onclick="toggleMatrix()" class="btn-secondary" id="btnToggleMatrix" style="width:100%; margin-top:20px; justify-content: center;">
@@ -199,7 +226,6 @@
                             </div>
                         </div>
                     </div>
-                </div>
             </div>
 
             <div id="step2" class="page-section fade-in" style="display:none;">
@@ -347,6 +373,39 @@
 </div>
 
 <div id="toast" class="toast hidden"><span>Action completed.</span></div>
+<div id="manualSelectModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:1000; padding:20px; box-sizing:border-box; backdrop-filter: blur(4px);">
+    <div style="background:white; width:100%; height:100%; max-width:1200px; margin:0 auto; display:flex; flex-direction:column; border-radius:8px; overflow:hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+        
+        <div style="padding:15px 20px; background:#2563eb; color:white; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h3 style="margin:0; font-size:18px; font-weight:600;"><i class="fas fa-hand-pointer"></i> Manual Table Selection</h3>
+                <div style="font-size:12px; opacity:0.9; margin-top:2px;">Automation failed. Please select the Header Row manually.</div>
+            </div>
+            <button onclick="closeManualModal()" style="background:rgba(255,255,255,0.2); border:none; color:white; padding:6px 12px; cursor:pointer; border-radius:4px; font-size:13px; transition: background 0.2s;">
+                Skip / Close
+            </button>
+        </div>
+
+        <div style="padding:12px 20px; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; gap:15px; align-items:center;">
+            <div style="font-weight:600; font-size:13px; color:#475569;">Select Sheet:</div>
+            <select id="manualSheetSelect" style="padding:6px; border-radius:4px; border:1px solid #cbd5e1; max-width:200px; font-size:13px;" onchange="renderRawSheet(this.value)"></select>
+            
+            <div style="flex-grow:1; text-align:center; font-size:14px; font-weight:600; color:#ef4444;" id="manualInstruction">
+                <i class="fas fa-arrow-down"></i> CLICK on the Header Row (Style, Color, Qty, etc.)
+            </div>
+
+            <button id="btnManualConfirm" onclick="confirmManualImport()" disabled 
+                style="background:#cbd5e1; color:white; border:none; padding:8px 20px; border-radius:4px; font-weight:bold; cursor:not-allowed; transition: all 0.3s;">
+                Confirm & Import
+            </button>
+        </div>
+
+        <div style="flex-grow:1; overflow:auto; padding:0; background:#fff; position:relative;">
+            <table id="manualRawTable" style="width:100%; border-collapse:collapse; font-size:12px; font-family:'Courier New', monospace;">
+                </table>
+        </div>
+    </div>
+</div>
 
 <script src="assets/script.js"></script>
 </body>
