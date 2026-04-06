@@ -298,6 +298,15 @@ function handleBulkUpload(input) {
                     let rawData = typeof extractSmartExcelData === "function" 
                         ? extractSmartExcelData(sheet) 
                         : XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }); 
+                    // --- NEW: HIDDEN ROW REMOVAL ---
+                    if (sheet['!rows'] && rawData.length > 0) {
+                        rawData = rawData.filter((row, rowIndex) => {
+                            const rMeta = sheet['!rows'][rowIndex];
+                            // Filter out if row is explicitly hidden, or if height is 0
+                            const isHidden = rMeta && (rMeta.hidden === true || rMeta.hidden === 1 || rMeta.hpx === 0 || rMeta.ht === 0);
+                            return !isHidden;
+                        });
+                    }
                     
                     // --- RESTORED: ADVANCED HIDDEN COLUMN REMOVAL ---
                     if (sheet['!cols'] && rawData.length > 0) {
