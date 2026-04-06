@@ -581,3 +581,307 @@ textarea { flex: 1; border: none; padding: 20px; resize: none; font-family: 'Men
     80% { transform: scale(1.1); }
     100% { transform: scale(1); opacity: 1; }
 }
+
+/* --- HIDDEN ROWS SECTION (Improved) --- */
+
+.hidden-rows-alert {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px; /* Smooth corners */
+    padding: 12px 20px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: #475569;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* Subtle shadow like screenshot */
+}
+
+.hidden-table-container {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    max-height: 350px; /* Fixed height for scrolling */
+    overflow-y: auto;  /* Enable vertical scroll */
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+    position: relative; /* Context for sticky */
+}
+
+/* Fix sticky header in hidden table */
+.hidden-table-container table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #f1f5f9; /* Solid background prevents see-through */
+    color: #334155;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid #e2e8f0;
+    box-shadow: 0 2px 4px -2px rgba(0,0,0,0.1);
+}
+
+/* Button Styling for "Add" */
+.btn-restore-row {
+    background: #ffffff;
+    color: #10b981;
+    border: 1px solid #10b981;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.btn-restore-row:hover {
+    background: #10b981;
+    color: white;
+}
+
+/* --- EDITABLE TABLE CELLS --- */
+.clean-table td[contenteditable="true"] {
+    cursor: text;
+    transition: background 0.2s, outline 0.1s;
+}
+
+.clean-table td[contenteditable="true"]:hover {
+    background-color: #f1f5f9; /* Light gray hover */
+    box-shadow: inset 0 0 0 1px #cbd5e1;
+}
+
+.clean-table td[contenteditable="true"]:focus {
+    background-color: #ffffff;
+    outline: 2px solid #2563eb; /* Blue border when typing */
+    z-index: 10; /* Bring above other cells */
+    position: relative;
+    color: #0f172a;
+}
+
+/* Excel-style Selection Highlights */
+.clickable-head {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+}
+.clickable-head:hover {
+    background-color: #e2e8f0;
+    color: #2563eb;
+}
+.selected-highlight {
+    background-color: #e0f2fe !important; /* Light Blue */
+    border: 1px double #3b82f6 !important; /* Blue Border */
+}
+
+/* Excel Selection Styling */
+.excel-selected {
+    background-color: #e3f2fd !important; /* Light Blue */
+    border: 2px solid #2196f3 !important; /* Blue Border */
+    outline: none;
+}
+
+/* Editing State */
+.editing {
+    background-color: white !important;
+    outline: 2px solid #4caf50 !important; /* Green for edit */
+    z-index: 10;
+}
+
+/* --- EXCEL-LIKE SELECTION STYLES --- */
+#manualTable {
+    user-select: none; /* Prevents native text highlighting */
+    outline: none;
+    border-collapse: collapse;
+    cursor: cell; /* Crosshair cursor like Excel */
+}
+
+/* The Blue Selection Box */
+.excel-selected {
+    background-color: rgba(33, 150, 243, 0.2) !important; /* Light Blue Background */
+    border: 1px double #2196f3 !important; /* Blue Border */
+}
+
+/* The "Active" Cell (currently editing) */
+.excel-editing {
+    background-color: #ffffff !important;
+    outline: 2px solid #4caf50 !important; /* Green Border */
+    z-index: 100;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Optional: Header styling for the manual table */
+#manualTable td {
+    padding: 4px 8px;
+    border: 1px solid #e0e0e0;
+    min-width: 50px;
+    height: 25px;
+}
+
+#table2FileName {
+    background: #e0f2fe;
+    color: #0369a1;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    border: 1px solid #bae6fd;
+    font-family: sans-serif;
+    display: none; /* Hidden by default until file uploaded */
+}
+
+/* --- STEP 2 EXCEL FEATURES --- */
+
+/* Selected Column Header */
+.excel-header {
+    cursor: pointer;
+    position: relative;
+}
+.excel-header:hover {
+    background-color: #f1f5f9;
+}
+.col-selected {
+    background-color: #dbeafe !important; /* Blue highlight */
+    border-bottom: 2px solid #2563eb;
+}
+
+/* Selected Column Cells */
+.cell-selected {
+    background-color: #eff6ff !important;
+}
+
+/* Dragging Row Visuals */
+.dragging-row {
+    opacity: 0.5;
+    background-color: #fef3c7;
+}
+tr[draggable="true"] {
+    cursor: grab;
+}
+
+/* --- EXCEL GRID STYLES --- */
+.clean-table th, .clean-table td {
+    border: 1px solid #e2e8f0;
+    position: relative; /* For outlining */
+}
+
+/* The Blue Border when you click a cell */
+.excel-focus {
+    outline: 2px solid #2563eb !important;
+    outline-offset: -2px;
+    z-index: 10;
+    background-color: rgba(37, 99, 235, 0.05);
+}
+
+/* The Blue Background when you click a Header */
+.excel-col-selected {
+    background-color: #dbeafe !important;
+}
+.excel-col-selected-head {
+    background-color: #bfdbfe !important;
+    border-bottom: 2px solid #2563eb !important;
+    color: #1e40af;
+}
+
+/* When actually typing inside a cell */
+.excel-editing {
+    outline: 2px solid #10b981 !important; /* Green */
+    background-color: #fff !important;
+    z-index: 20;
+    cursor: text;
+}
+
+/* --- EXCEL DRAG SELECTION STYLES --- */
+.clean-table td {
+    user-select: none; /* Prevents text highlighting while dragging */
+}
+
+/* 1. The Light Blue Background for selected area */
+.excel-cell-highlight {
+    background-color: rgba(37, 99, 235, 0.1) !important;
+}
+
+/* 2. The Thick Blue Borders (Outline the selection) */
+/* We apply these dynamically to the edges of the selection */
+.excel-border-top { border-top: 2px solid #2563eb !important; }
+.excel-border-bottom { border-bottom: 2px solid #2563eb !important; }
+.excel-border-left { border-left: 2px solid #2563eb !important; }
+.excel-border-right { border-right: 2px solid #2563eb !important; }
+
+/* 3. Editing State */
+.excel-editing {
+    outline: 2px solid #10b981 !important;
+    background-color: #fff !important;
+    z-index: 50;
+    cursor: text;
+}
+
+/* --- EXCEL DRAG SELECTION STYLES --- */
+.clean-table td {
+    user-select: none; /* Prevents text highlighting while dragging */
+}
+
+/* 1. The Light Blue Background for selected area */
+.excel-cell-highlight {
+    background-color: rgba(37, 99, 235, 0.1) !important;
+}
+
+/* 2. The Thick Blue Borders (Outline the selection) */
+.excel-border-top { border-top: 2px solid #2563eb !important; }
+.excel-border-bottom { border-bottom: 2px solid #2563eb !important; }
+.excel-border-left { border-left: 2px solid #2563eb !important; }
+.excel-border-right { border-right: 2px solid #2563eb !important; }
+
+/* 3. Editing State */
+.excel-editing {
+    outline: 2px solid #10b981 !important;
+    background-color: #fff !important;
+    z-index: 50;
+    cursor: text;
+}
+
+/* ==========================================
+   SIDEBAR TOGGLE ANIMATION
+========================================== */
+.sidebar {
+    transition: all 0.3s ease-in-out;
+    overflow-x: hidden; /* Prevents text from spilling out when shrinking */
+}
+
+.sidebar.collapsed {
+    min-width: 0 !important;
+    width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-right: none !important;
+    opacity: 0;
+}
+
+#sidebarToggle:hover {
+    color: #2563eb !important; /* Turns blue on hover */
+}
+
+/* --- PHASE 3 & 4 EXCEL UPGRADES --- */
+.fill-handle {
+    position: absolute;
+    width: 8px; height: 8px;
+    background-color: #2563eb;
+    border: 1px solid white;
+    cursor: crosshair;
+    z-index: 100;
+}
+.excel-fill-preview {
+    background-color: rgba(37, 99, 235, 0.05) !important;
+    border: 2px dashed #2563eb !important;
+}
+.sort-icon {
+    font-size: 10px;
+    color: #94a3b8;
+    margin-left: 5px;
+    transition: color 0.2s;
+}
+.clickable-head:hover .sort-icon { color: #2563eb; }
