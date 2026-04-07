@@ -633,9 +633,7 @@ function extractTableStrict(data, customKeyword = null) {
     // --- ENHANCED REGEX BUILDER ---
     let qtyRegex;
     if (customKeyword) {
-        // 1. Escape special characters (like /, (, ), etc.)
         const escaped = customKeyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // 2. Allow for multiple spaces (e.g., "Order Qty" matches "Order   Qty")
         const flexSpace = escaped.replace(/\s+/g, '\\s*'); 
         qtyRegex = new RegExp(flexSpace, "i");
     } else {
@@ -662,23 +660,21 @@ function extractTableStrict(data, customKeyword = null) {
         const rowText = row.join(" ").toLowerCase();
         const hasQty = row.some(cell => cell && qtyRegex.test(String(cell).trim()));
 
-        // --- ENHANCEMENT 1: CUSTOM KEYWORD ABSOLUTE OVERRIDE ---
-        // If you provided a custom keyword and we found it, IGNORE all skip words and start here immediately!
+        // Custom Keyword Override
         if (customKeyword && hasQty) { 
             startIndex = i; 
             break; 
         }
 
-        // --- NORMAL SKIP KEYWORDS (Only runs if no custom keyword override happened) ---
+        // Skip Keywords
         if (rowText.includes("address:") || rowText.includes("attn:") || rowText.includes("country:")) continue;
         if (rowText.includes("tel#") || rowText.includes("email:") || rowText.includes("fax:")) continue;
         if (rowText.includes("just fill total qty") || rowText.includes("no moq")) continue;
         if (rowText.includes("round up") || rowText.includes("consider wastage")) continue;
         if (rowText.includes("refer to the chart") || rowText.includes("refer to chart")) continue;
-        if (rowText.includes("kohls po quantities")|| rowText.includes("minimum")) continue; // Fixed lowercase 'm' here!
+        if (rowText.includes("kohls po quantities")|| rowText.includes("minimum")) continue; 
         if (rowText.includes("overrun") && rowText.includes("ordering qty")) continue;
 
-        // --- NORMAL DETECTION LOGIC ---
         const hasChinese = row.some(cell => cell && chineseRegex.test(String(cell).trim()));
 
         if (hasQty && hasChinese) { startIndex = i; break; }
@@ -688,12 +684,15 @@ function extractTableStrict(data, customKeyword = null) {
 
     if (startIndex === -1) return [];
 
-    // ... (Remainder of the function remains exactly the same from here down) ...
-    // 3. PREPARE HEADERS
+    // ==========================================
+    // NEW SMART MERGE LOGIC (Steps A, B, C, D)
+    // ==========================================
+
     let headerRow = data[startIndex] || [];
     let nextRow = data[startIndex + 1]; 
     let dataStartIndex = startIndex + 1; 
 
+    // Skip #N/A filler rows
     if (nextRow && Array.isArray(nextRow) && nextRow.length > 0 && nextRow.join(" ").toLowerCase().includes("#n/a")) {
         nextRow = data[startIndex + 2];
         dataStartIndex = startIndex + 2; 
@@ -701,15 +700,20 @@ function extractTableStrict(data, customKeyword = null) {
 
     let useCombinedHeader = false;
     if (nextRow && Array.isArray(nextRow) && nextRow.length > 0) {
-        const subKeywords = ["UPC", "EAN", "FEATURE ICON"];
+        // Added "VSN", "PART", "OUT", "IN" to trigger combination
+        const subKeywords = ["UPC", "EAN", "FEATURE", "VSN", "PART", "OUT", "IN", "SIZE", "COLOR", "STYLE", "SKU"];
         useCombinedHeader = nextRow.some(c => {
             if (!c) return false;
             const s = String(c).toUpperCase();
             return subKeywords.some(k => s.includes(k));
         });
+        
+        // Safety: If the sub-row contains an actual 12+ digit barcode, it's data, not a header!
+        const hasBarcodeData = nextRow.some(c => /^\d{11,14}$/.test(String(c).trim()));
+        if(hasBarcodeData) useCombinedHeader = false;
     }
 
-    // --- STEP A: BUILD UNIFIED HEADER LIST ---
+    // --- STEP A: Build Unified Headers (Fixes horizontal merges) ---
     let unifiedHeaders = [];
     const maxLen = Math.max(headerRow.length || 0, (nextRow ? nextRow.length : 0));
     let lastMainHeader = "";
@@ -718,17 +722,49 @@ function extractTableStrict(data, customKeyword = null) {
         let val1 = headerRow[c] ? String(headerRow[c]).trim() : "";
         let val2 = (useCombinedHeader && nextRow && nextRow[c]) ? String(nextRow[c]).trim() : "";
 
+        // Inherit header from the left if blank (Merged Cells)
         if (!val1 && lastMainHeader) val1 = lastMainHeader;
         else if (val1) lastMainHeader = val1;
 
         let finalName = val1;
-        if (val1.toLowerCase().includes("description")) finalName = val1; 
-        else finalName = (val2 && val2.length > 1) ? val2 : val1;
         
+        if (val2) {
+            let v1Low = val1.toLowerCase();
+            let v2Low = val2.toLowerCase();
+
+            // ⚡ FIX 1: Throw away "FEATURE CALL-OUTS" if it's paired with a Feature Icon
+            if (v1Low.includes("feature call") && v2Low.includes("feature icon")) {
+                finalName = val2;
+            } else if (v2Low.includes("feature call") && v1Low.includes("feature icon")) {
+                finalName = val1;
+            }
+            // 1. If val2 is very short, it needs val1 for context (e.g. val1="Feature", val2="1" -> "Feature 1")
+            else if (val2.length <= 3 && !v2Low.includes("vsn")) {
+                finalName = val1 + " " + val2;
+            } 
+            // 2. If they share the same starting word (like "VSN"), just use val2!
+            else if (v1Low.startsWith(val2.split(/[\s_]+/)[0].toLowerCase())) {
+                finalName = val2;
+            }
+            // 3. Otherwise, val2 is usually the best specific column name (like "13digits EAN")
+            else {
+                finalName = val2; 
+            }
+        }
+        
+        if(!finalName) finalName = "Column " + c;
+
+        // Remove underscores and extra spaces (Turns "VSN_Part_1" into "VSN Part 1")
+        finalName = finalName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+
         unifiedHeaders.push({ name: finalName, originalIndex: c });
     }
 
-    // --- STEP B: EXTRACT RAW DATA ---
+    if (useCombinedHeader) {
+        dataStartIndex++; // Move start down if we consumed row 2 as a header
+    }
+
+    // --- STEP B: Extract Raw Data Body ---
     let rawBody = [];
     let emptyRowCount = 0;
     
@@ -744,7 +780,7 @@ function extractTableStrict(data, customKeyword = null) {
 
         const rowStr = row.join(" ").toLowerCase();
 
-        // === 1. STOP KEYWORDS (If found, STOP CAPTURING) ===
+        // 1. Stop Keywords
         if (rowStr.includes("information")) break;
         if (rowStr.includes("factory as listed")) break;
         if (rowStr.includes("south china contact")) break;
@@ -753,14 +789,14 @@ function extractTableStrict(data, customKeyword = null) {
         if (rowStr.includes("disclaimer") || rowStr.startsWith("note") || rowStr.startsWith("remarks")) break;
         if (rowStr.includes("images")) break;
 
-        // === 2. TOTAL CHECK ===
+        // 2. Total Check
         const firstTextIndex = row.findIndex(c => c && String(c).trim().length > 0);
         if (firstTextIndex !== -1) {
             let firstText = String(row[firstTextIndex]).toLowerCase().trim();
             if (firstText === "total" || firstText.startsWith("total:") || firstText.startsWith("total qty")) break;
         }
 
-        // === 3. SKIP JUNK (Ignore row but continue) ===
+        // 3. Skip Junk
         if (rowStr.includes("please select") || rowStr.includes("#n/a") || rowStr.includes("#ref!")) continue;
         if (rowStr.includes("(max") && rowStr.includes("digits)")) continue; 
         if (row[0] && String(row[0]).toLowerCase().trim().startsWith("eg")) continue;
@@ -768,45 +804,77 @@ function extractTableStrict(data, customKeyword = null) {
         rawBody.push(row);
     }
 
-    // --- STEP C: WINNER TAKES ALL ---
-    let groups = {};
-    unifiedHeaders.forEach(col => {
-        let key = col.name;
-        if (!key) return; 
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(col.originalIndex);
-    });
+    // --- STEP C: Smart Adjacent Merging ---
+    // Group ADJACENT columns that have the exact same resolved name
+    let groupedHeaders = [];
+    let currentGroup = null;
+
+    for (let i = 0; i < unifiedHeaders.length; i++) {
+        let col = unifiedHeaders[i];
+        if (!currentGroup) {
+            currentGroup = { name: col.name, indices: [col.originalIndex] };
+        } else if (currentGroup.name === col.name) {
+            currentGroup.indices.push(col.originalIndex); // Expand the adjacent group
+        } else {
+            groupedHeaders.push(currentGroup);
+            currentGroup = { name: col.name, indices: [col.originalIndex] }; // Start new group
+        }
+    }
+    if (currentGroup) groupedHeaders.push(currentGroup);
 
     let finalIndices = [];
     let finalHeaderNames = [];
-    let seenHeaders = new Set();
 
-    unifiedHeaders.forEach(col => {
-        if (!col.name || seenHeaders.has(col.name)) return;
-        seenHeaders.add(col.name);
-        
-        let indices = groups[col.name];
-        let winnerIdx = indices[0];
-
-        if (indices.length > 1) {
-            let maxCount = -1;
-            indices.forEach(idx => {
+    groupedHeaders.forEach(group => {
+        if (group.indices.length === 1) {
+            // Standalone column (e.g. VSN_Part_1)
+            finalIndices.push(group.indices[0]);
+            finalHeaderNames.push(group.name);
+        } else {
+            // Merged columns with same name (e.g. 3 blank columns under "Item Description")
+            // Check which of these columns actually contains data
+            let counts = group.indices.map(idx => {
                 let count = 0;
                 rawBody.forEach(row => {
-                     if (row[idx] && String(row[idx]).trim().length > 0) count++;
+                    if (row[idx] && String(row[idx]).trim().length > 0) count++;
                 });
-                if (count > maxCount) {
-                    maxCount = count;
-                    winnerIdx = idx;
-                }
+                return { idx: idx, count: count };
             });
+
+            let maxData = Math.max(...counts.map(c => c.count));
+
+            if (maxData === 0) {
+                // If none of the merged columns have data, just keep the first one
+                finalIndices.push(group.indices[0]);
+                finalHeaderNames.push(group.name);
+            } else {
+                // Keep ONLY the columns in this merged group that actually have data
+                counts.forEach(c => {
+                    if (c.count > 0) {
+                        finalIndices.push(c.idx);
+                        finalHeaderNames.push(group.name);
+                    }
+                });
+            }
         }
-        
-        finalIndices.push(winnerIdx);
-        finalHeaderNames.push(col.name);
     });
 
-    // --- STEP D: BUILD FINAL TABLE ---
+    // ⚡ FIX 2: DEDUPLICATE IDENTICAL COLUMNS (e.g. Item Description 1, 2) ⚡
+    let duplicateTracker = {};
+    finalHeaderNames.forEach(n => {
+        duplicateTracker[n] = (duplicateTracker[n] || 0) + 1;
+    });
+    
+    let currentCounts = {};
+    for (let i = 0; i < finalHeaderNames.length; i++) {
+        let name = finalHeaderNames[i];
+        if (duplicateTracker[name] > 1) {
+            currentCounts[name] = (currentCounts[name] || 0) + 1;
+            finalHeaderNames[i] = name + " " + currentCounts[name];
+        }
+    }
+
+    // --- STEP D: Build Final Table ---
     let cleanRows = [];
     cleanRows.push(finalHeaderNames); 
 
@@ -816,6 +884,14 @@ function extractTableStrict(data, customKeyword = null) {
             return (val === null || val === undefined) ? "" : val;
         });
         cleanRows.push(newRow);
+    });
+
+    // Pad to ensure a perfect grid
+    let maxColsFinal = 0;
+    cleanRows.forEach(r => { if (r.length > maxColsFinal) maxColsFinal = r.length; });
+    cleanRows = cleanRows.map(r => {
+        while (r.length < maxColsFinal) r.push("");
+        return r;
     });
 
     return cleanRows;
@@ -2892,7 +2968,7 @@ function renderRawSheet(sheetName) {
     const sheet = manualWorkbook.Sheets[sheetName];
     
     // Use header:1 to get raw array of arrays
-    const data = extractSmartExcelData(sheet);
+    const data = getVisibleExcelData(sheet);
     
     const table = document.getElementById('manualRawTable');
     table.innerHTML = "";
@@ -3023,7 +3099,7 @@ function confirmManualImport() {
     try {
         // 1. Get Data from Workbook
         const sheet = manualWorkbook.Sheets[currentSheetName];
-        const rawData = extractSmartExcelData(sheet);
+        const rawData = getVisibleExcelData(sheet);
         
         // 2. Slice Data based on selection
         const rMin = Math.min(selectionStartRow, selectionEndRow);
@@ -4679,3 +4755,31 @@ const GridEngine = {
         if(container) container.focus({ preventScroll: true }); 
     }
 };
+
+function getVisibleExcelData(sheet) {
+    let data = extractSmartExcelData(sheet);
+
+    // 1. Remove Hidden Rows
+    if (sheet['!rows'] && data.length > 0) {
+        data = data.filter((row, rowIndex) => {
+            const rMeta = sheet['!rows'][rowIndex];
+            const isHidden = rMeta && (rMeta.hidden === true || rMeta.hidden === 1 || rMeta.hpx === 0 || rMeta.ht === 0);
+            return !isHidden;
+        });
+    }
+
+    // 2. Remove Hidden Columns
+    if (sheet['!cols'] && data.length > 0) {
+        const hiddenColIndices = new Set();
+        sheet['!cols'].forEach((col, i) => {
+            if (col && (col.hidden === true || col.hidden === 1 || col.wpx === 0 || col.width === 0)) {
+                hiddenColIndices.add(i);
+            }
+        });
+        if (hiddenColIndices.size > 0) {
+            data = data.map(row => row.filter((_, i) => !hiddenColIndices.has(i)));
+        }
+    }
+
+    return data;
+}
