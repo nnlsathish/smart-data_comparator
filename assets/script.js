@@ -364,7 +364,8 @@ function handleBulkUpload(input) {
                     let hasValidData = false;
                     if (cleanTable.length > 1) {
                         const headerRow = cleanTable[0];
-                        const searchRegex = customKey ? new RegExp(customKey, "i") : /qty|quantity|total\s*qty/i;
+                        // ⚡ FIX: Updated validation regex to match the ENTIRE Qty Group suite ⚡
+                        const searchRegex = customKey ? new RegExp(customKey, "i") : /qty|quantity|total\s*qty|bill\s*(?:&|and)?\s*ship\s*(?:qty|quantity)|round\s*up|order\s*(?:qty|quantity)/i;
                         const qtyColIdx = headerRow.findIndex(h => searchRegex.test(String(h)));
 
                         if (qtyColIdx !== -1) {
@@ -630,14 +631,14 @@ function extractTableStrict(data, customKeyword = null) {
 
     let startIndex = -1;
     
-    // --- ENHANCED REGEX BUILDER ---
+    // ⚡ FIX: Comprehensive QTY_GROUP Regex for identifying tables ⚡
     let qtyRegex;
     if (customKeyword) {
         const escaped = customKeyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const flexSpace = escaped.replace(/\s+/g, '\\s*'); 
         qtyRegex = new RegExp(flexSpace, "i");
     } else {
-        qtyRegex = /qty|quantity|total\s*qty/i;
+        qtyRegex = /qty|quantity|total\s*qty|bill\s*(?:&|and)?\s*ship\s*(?:qty|quantity)|round\s*up|order\s*(?:qty|quantity)/i;
     }
         
     const chineseRegex = /[\u4e00-\u9fff]/;
@@ -652,7 +653,7 @@ function extractTableStrict(data, customKeyword = null) {
     }
 
     // 2. FIND HEADER
-    const scanLimit = Math.min(data.length, 300);
+    const scanLimit = Math.min(data.length, 500);
     for (let i = searchStartRow; i < scanLimit; i++) {
         let row = data[i];
         if (!row || !Array.isArray(row)) continue;
@@ -685,7 +686,7 @@ function extractTableStrict(data, customKeyword = null) {
     if (startIndex === -1) return [];
 
     // ==========================================
-    // NEW SMART MERGE LOGIC (Steps A, B, C, D)
+    // SMART MERGE LOGIC (Steps A, B, C, D)
     // ==========================================
 
     let headerRow = data[startIndex] || [];
@@ -713,7 +714,7 @@ function extractTableStrict(data, customKeyword = null) {
         if(hasBarcodeData) useCombinedHeader = false;
     }
 
-    // --- STEP A: Build Unified Headers (Fixes horizontal merges) ---
+    // --- STEP A: Build Unified Headers ---
     let unifiedHeaders = [];
     const maxLen = Math.max(headerRow.length || 0, (nextRow ? nextRow.length : 0));
     let lastMainHeader = "";
@@ -754,7 +755,7 @@ function extractTableStrict(data, customKeyword = null) {
         
         if(!finalName) finalName = "Column " + c;
 
-        // Remove underscores and extra spaces (Turns "VSN_Part_1" into "VSN Part 1")
+        // Remove underscores and extra spaces
         finalName = finalName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
 
         unifiedHeaders.push({ name: finalName, originalIndex: c });
@@ -773,39 +774,48 @@ function extractTableStrict(data, customKeyword = null) {
         
         if (!row || row.every(c => !c || String(c).trim() === "")) {
             emptyRowCount++;
-            if (emptyRowCount >= 10) break;
+            // ⚡ FIX: Increased from 10 to 50 so it bridges massive gaps in Excel formatting ⚡
+            if (emptyRowCount >= 50) break;
             continue;
         }
         emptyRowCount = 0;
 
         const rowStr = row.join(" ").toLowerCase();
 
-        // 1. Stop Keywords
-        if (rowStr.includes("information")) break;
-        if (rowStr.includes("factory as listed")) break;
-        if (rowStr.includes("south china contact")) break;
-        if (rowStr.includes("shipping instruction")) break;
-        if (rowStr.includes("page") && rowStr.includes("of")) break;
-        if (rowStr.includes("disclaimer") || rowStr.startsWith("note") || rowStr.startsWith("remarks")) break;
-        if (rowStr.includes("images")) break;
+        // ⚡ AGGRESSIVE FOOTER KILLER: Halts extraction before it reads junk data! ⚡
+        if (rowStr.includes("total quantity") || 
+            rowStr.includes("total qty") || 
+            rowStr.includes("pls specify") || 
+            rowStr.includes("working days") || 
+            rowStr.includes("supplied by:") || 
+            rowStr.includes("send order to email") || 
+            rowStr.includes("information") || 
+            rowStr.includes("factory as listed") || 
+            rowStr.includes("south china contact") || 
+            rowStr.includes("shipping instruction") || 
+            (rowStr.includes("page") && rowStr.includes("of")) || 
+            rowStr.includes("disclaimer") || 
+            rowStr.startsWith("note") || 
+            rowStr.startsWith("remarks") || 
+            rowStr.includes("images")) {
+            break;
+        }
 
-        // 2. Total Check
         const firstTextIndex = row.findIndex(c => c && String(c).trim().length > 0);
         if (firstTextIndex !== -1) {
             let firstText = String(row[firstTextIndex]).toLowerCase().trim();
-            if (firstText === "total" || firstText.startsWith("total:") || firstText.startsWith("total qty")) break;
+            if (firstText === "total" || firstText.startsWith("total:") || firstText.startsWith("total qty") || firstText.startsWith("total quantity")) {
+                break;
+            }
         }
 
-        // 3. Skip Junk
-        if (rowStr.includes("please select") || rowStr.includes("#n/a") || rowStr.includes("#ref!")) continue;
-        if (rowStr.includes("(max") && rowStr.includes("digits)")) continue; 
+        if (rowStr.includes("please select") || rowStr.includes("#n/a") || rowStr.includes("#ref!") || (rowStr.includes("(max") && rowStr.includes("digits)"))) continue; 
         if (row[0] && String(row[0]).toLowerCase().trim().startsWith("eg")) continue;
 
         rawBody.push(row);
     }
 
     // --- STEP C: Smart Adjacent Merging ---
-    // Group ADJACENT columns that have the exact same resolved name
     let groupedHeaders = [];
     let currentGroup = null;
 
@@ -831,35 +841,29 @@ function extractTableStrict(data, customKeyword = null) {
             finalIndices.push(group.indices[0]);
             finalHeaderNames.push(group.name);
         } else {
-            // Merged columns with same name (e.g. 3 blank columns under "Item Description")
-            // Check which of these columns actually contains data
-            let counts = group.indices.map(idx => {
+            // ⚡ FIX: Winner Takes All for Merged Cells ⚡
+            // If 3 columns share the exact same header, keep only the one with the most data
+            let bestIdx = group.indices[0];
+            let maxCount = -1;
+
+            group.indices.forEach(idx => {
                 let count = 0;
                 rawBody.forEach(row => {
-                    if (row[idx] && String(row[idx]).trim().length > 0) count++;
+                    let val = (row[idx] === null || row[idx] === undefined) ? "" : String(row[idx]).trim();
+                    if (val !== "") count++;
                 });
-                return { idx: idx, count: count };
+                if (count > maxCount) {
+                    maxCount = count;
+                    bestIdx = idx;
+                }
             });
 
-            let maxData = Math.max(...counts.map(c => c.count));
-
-            if (maxData === 0) {
-                // If none of the merged columns have data, just keep the first one
-                finalIndices.push(group.indices[0]);
-                finalHeaderNames.push(group.name);
-            } else {
-                // Keep ONLY the columns in this merged group that actually have data
-                counts.forEach(c => {
-                    if (c.count > 0) {
-                        finalIndices.push(c.idx);
-                        finalHeaderNames.push(group.name);
-                    }
-                });
-            }
+            finalIndices.push(bestIdx);
+            finalHeaderNames.push(group.name);
         }
     });
 
-    // ⚡ FIX 2: DEDUPLICATE IDENTICAL COLUMNS (e.g. Item Description 1, 2) ⚡
+    // ⚡ FIX: DEDUPLICATE IDENTICAL COLUMNS (e.g. Item Description 1, 2) ⚡
     let duplicateTracker = {};
     finalHeaderNames.forEach(n => {
         duplicateTracker[n] = (duplicateTracker[n] || 0) + 1;
