@@ -661,13 +661,8 @@ function extractTableStrict(data, customKeyword = null) {
         const rowText = row.join(" ").toLowerCase();
         const hasQty = row.some(cell => cell && qtyRegex.test(String(cell).trim()));
 
-        // Custom Keyword Override
-        if (customKeyword && hasQty) { 
-            startIndex = i; 
-            break; 
-        }
+        if (customKeyword && hasQty) { startIndex = i; break; }
 
-        // Skip Keywords
         if (rowText.includes("address:") || rowText.includes("attn:") || rowText.includes("country:")) continue;
         if (rowText.includes("tel#") || rowText.includes("email:") || rowText.includes("fax:")) continue;
         if (rowText.includes("just fill total qty") || rowText.includes("no moq")) continue;
@@ -701,17 +696,25 @@ function extractTableStrict(data, customKeyword = null) {
 
     let useCombinedHeader = false;
     if (nextRow && Array.isArray(nextRow) && nextRow.length > 0) {
-        // Added "VSN", "PART", "OUT", "IN" to trigger combination
         const subKeywords = ["UPC", "EAN", "FEATURE", "VSN", "PART", "OUT", "IN", "SIZE", "COLOR", "STYLE", "SKU"];
         useCombinedHeader = nextRow.some(c => {
             if (!c) return false;
-            const s = String(c).toUpperCase();
-            return subKeywords.some(k => s.includes(k));
+            return subKeywords.some(k => String(c).toUpperCase().includes(k));
         });
         
-        // Safety: If the sub-row contains an actual 12+ digit barcode, it's data, not a header!
         const hasBarcodeData = nextRow.some(c => /^\d{11,14}$/.test(String(c).trim()));
         if(hasBarcodeData) useCombinedHeader = false;
+
+        // ⚡ NEW FIX: DATA ROW DETECTOR ⚡
+        // If the next row has a number in the QTY column, it is DATA, not a header!
+        const qtyIdx = headerRow.findIndex(c => c && qtyRegex.test(String(c).trim()));
+        if (qtyIdx !== -1 && nextRow[qtyIdx] !== undefined && nextRow[qtyIdx] !== null) {
+            const nextRowQtyVal = String(nextRow[qtyIdx]).trim().replace(/,/g, '');
+            // Checks if the value is a number (e.g. 0, 2165)
+            if (/^-?\d+(\.\d+)?$/.test(nextRowQtyVal)) {
+                useCombinedHeader = false;
+            }
+        }
     }
 
     // --- STEP A: Build Unified Headers ---
@@ -723,47 +726,37 @@ function extractTableStrict(data, customKeyword = null) {
         let val1 = headerRow[c] ? String(headerRow[c]).trim() : "";
         let val2 = (useCombinedHeader && nextRow && nextRow[c]) ? String(nextRow[c]).trim() : "";
 
-        // Inherit header from the left if blank (Merged Cells)
         if (!val1 && lastMainHeader) val1 = lastMainHeader;
         else if (val1) lastMainHeader = val1;
 
         let finalName = val1;
         
         if (val2) {
-            let v1Low = val1.toLowerCase();
-            let v2Low = val2.toLowerCase();
+            let v1Clean = val1.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+            let v2Clean = val2.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+            let v1Low = v1Clean.toLowerCase();
+            let v2Low = v2Clean.toLowerCase();
 
-            // ⚡ FIX 1: Throw away "FEATURE CALL-OUTS" if it's paired with a Feature Icon
             if (v1Low.includes("feature call") && v2Low.includes("feature icon")) {
-                finalName = val2;
+                finalName = v2Clean;
             } else if (v2Low.includes("feature call") && v1Low.includes("feature icon")) {
-                finalName = val1;
-            }
-            // 1. If val2 is very short, it needs val1 for context (e.g. val1="Feature", val2="1" -> "Feature 1")
-            else if (val2.length <= 3 && !v2Low.includes("vsn")) {
-                finalName = val1 + " " + val2;
-            } 
-            // 2. If they share the same starting word (like "VSN"), just use val2!
-            else if (v1Low.startsWith(val2.split(/[\s_]+/)[0].toLowerCase())) {
-                finalName = val2;
-            }
-            // 3. Otherwise, val2 is usually the best specific column name (like "13digits EAN")
-            else {
-                finalName = val2; 
+                finalName = v1Clean;
+            } else if (v2Clean.length <= 3 && !v2Low.includes("vsn")) {
+                finalName = v1Clean + " " + v2Clean;
+            } else if (v1Low.startsWith(v2Clean.split(/[\s_]+/)[0].toLowerCase())) {
+                finalName = v2Clean;
+            } else {
+                finalName = v2Clean; 
             }
         }
         
         if(!finalName) finalName = "Column " + c;
 
-        // Remove underscores and extra spaces
         finalName = finalName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-
         unifiedHeaders.push({ name: finalName, originalIndex: c });
     }
 
-    if (useCombinedHeader) {
-        dataStartIndex++; // Move start down if we consumed row 2 as a header
-    }
+    if (useCombinedHeader) dataStartIndex++;
 
     // --- STEP B: Extract Raw Data Body ---
     let rawBody = [];
@@ -774,7 +767,7 @@ function extractTableStrict(data, customKeyword = null) {
         
         if (!row || row.every(c => !c || String(c).trim() === "")) {
             emptyRowCount++;
-            // ⚡ FIX: Increased from 10 to 50 so it bridges massive gaps in Excel formatting ⚡
+            // Bridges massive formatting gaps
             if (emptyRowCount >= 50) break;
             continue;
         }
@@ -782,7 +775,6 @@ function extractTableStrict(data, customKeyword = null) {
 
         const rowStr = row.join(" ").toLowerCase();
 
-        // ⚡ AGGRESSIVE FOOTER KILLER: Halts extraction before it reads junk data! ⚡
         if (rowStr.includes("total quantity") || 
             rowStr.includes("total qty") || 
             rowStr.includes("pls specify") || 
@@ -824,10 +816,10 @@ function extractTableStrict(data, customKeyword = null) {
         if (!currentGroup) {
             currentGroup = { name: col.name, indices: [col.originalIndex] };
         } else if (currentGroup.name === col.name) {
-            currentGroup.indices.push(col.originalIndex); // Expand the adjacent group
+            currentGroup.indices.push(col.originalIndex); 
         } else {
             groupedHeaders.push(currentGroup);
-            currentGroup = { name: col.name, indices: [col.originalIndex] }; // Start new group
+            currentGroup = { name: col.name, indices: [col.originalIndex] }; 
         }
     }
     if (currentGroup) groupedHeaders.push(currentGroup);
@@ -835,35 +827,51 @@ function extractTableStrict(data, customKeyword = null) {
     let finalIndices = [];
     let finalHeaderNames = [];
 
+    // ⚡ FIX 2: RESTORE CLONE DETECTION (Replaces Winner Takes All) ⚡
+    // This safely removes 100% identical duplicates
+    // But keeps merged columns that contain DIFFERENT anomalies (like Womens_Size)
     groupedHeaders.forEach(group => {
         if (group.indices.length === 1) {
-            // Standalone column (e.g. VSN_Part_1)
             finalIndices.push(group.indices[0]);
             finalHeaderNames.push(group.name);
         } else {
-            // ⚡ FIX: Winner Takes All for Merged Cells ⚡
-            // If 3 columns share the exact same header, keep only the one with the most data
-            let bestIdx = group.indices[0];
-            let maxCount = -1;
-
+            let uniqueCols = []; 
+            
             group.indices.forEach(idx => {
-                let count = 0;
+                let hasData = false;
+                let columnData = [];
+                
                 rawBody.forEach(row => {
                     let val = (row[idx] === null || row[idx] === undefined) ? "" : String(row[idx]).trim();
-                    if (val !== "") count++;
+                    columnData.push(val);
+                    if (val !== "") hasData = true;
                 });
-                if (count > maxCount) {
-                    maxCount = count;
-                    bestIdx = idx;
+                
+                if (hasData) {
+                    let isDuplicate = uniqueCols.some(keptIdx => {
+                        let keptData = rawBody.map(row => (row[keptIdx] === null || row[keptIdx] === undefined) ? "" : String(row[keptIdx]).trim());
+                        return columnData.every((val, r) => val === keptData[r]);
+                    });
+                    
+                    if (!isDuplicate) {
+                        uniqueCols.push(idx); 
+                    }
                 }
             });
 
-            finalIndices.push(bestIdx);
-            finalHeaderNames.push(group.name);
+            if (uniqueCols.length === 0) {
+                finalIndices.push(group.indices[0]);
+                finalHeaderNames.push(group.name);
+            } else {
+                uniqueCols.forEach(idx => {
+                    finalIndices.push(idx);
+                    finalHeaderNames.push(group.name);
+                });
+            }
         }
     });
 
-    // ⚡ FIX: DEDUPLICATE IDENTICAL COLUMNS (e.g. Item Description 1, 2) ⚡
+    // Deduplicate Identical Columns (e.g. Size Field Gender 1, Size Field Gender 2)
     let duplicateTracker = {};
     finalHeaderNames.forEach(n => {
         duplicateTracker[n] = (duplicateTracker[n] || 0) + 1;
@@ -890,7 +898,6 @@ function extractTableStrict(data, customKeyword = null) {
         cleanRows.push(newRow);
     });
 
-    // Pad to ensure a perfect grid
     let maxColsFinal = 0;
     cleanRows.forEach(r => { if (r.length > maxColsFinal) maxColsFinal = r.length; });
     cleanRows = cleanRows.map(r => {
