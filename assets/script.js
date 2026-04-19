@@ -1827,7 +1827,27 @@ function resetMapping() {
     updateMapStats(); 
 }
 
-function autoMapAgain() { renderMappingTable(); }
+function resetViewOnly() {
+    resetMapping();
+    showToast("View Reset");
+}
+
+function autoMapAgain() { 
+    const p = projects[activeProjectIdx];
+    if (!p) return;
+    
+    // ⚡ FIX: Force the system to forget the previous mapping lock
+    p.isMapped = false;
+    p.mapping = [];
+    
+    // 1. Clear the UI dropdowns
+    resetMapping();
+    
+    // 2. Re-run the auto-mapper engine
+    renderMappingTable(); 
+    
+    showToast("Auto-Map Applied");
+}
 
 function filterMappingRows() {
     const filter = document.getElementById('mapSearchInput').value.toLowerCase();
@@ -3110,19 +3130,19 @@ function confirmManualImport() {
     try {
         // 1. Get Data from Workbook
         const sheet = manualWorkbook.Sheets[currentSheetName];
-        const rawData = getVisibleExcelData(sheet);
-        
+        const rawData = extractSmartExcelData(sheet);
+
         // 2. Slice Data based on selection
         const rMin = Math.min(selectionStartRow, selectionEndRow);
         const rMax = Math.max(selectionStartRow, selectionEndRow);
         const cMin = Math.min(selectionStartCol, selectionEndCol);
         const cMax = Math.max(selectionStartCol, selectionEndCol);
-        
+
         let slicedData = [];
-        for(let r = rMin; r <= rMax; r++) {
+        for (let r = rMin; r <= rMax; r++) {
             let newRow = [];
             const srcRow = rawData[r] || [];
-            for(let c = cMin; c <= cMax; c++) {
+            for (let c = cMin; c <= cMax; c++) {
                 newRow.push(srcRow[c] || "");
             }
             slicedData.push(newRow);
@@ -3134,19 +3154,25 @@ function confirmManualImport() {
         }
 
         const newRawData = arrayToTSV(slicedData);
-        
-        // ===============================================
-        // NEW LOGIC: DETECT DUPLICATE & ASK USER
-        // ===============================================
-        
-        // Check if a tab with this sheet name ALREADY exists
-        const existingIdx = projects.findIndex(p => p.name === currentSheetName);
 
-        if (existingIdx !== -1) {
-            // CONFLICT FOUND: Ask the user what to do
-            showConflictModal(currentSheetName, existingIdx, newRawData);
+        // ===============================================
+        // ⚡ FIX: TARGET THE EXACT ACTIVE CUBOID ⚡
+        // ===============================================
+
+        // Identify the exact cuboid you are currently interacting with
+        let targetIdx = typeof editingProjectIndex !== 'undefined' && editingProjectIndex !== -1 
+            ? editingProjectIndex 
+            : activeProjectIdx;
+
+        // If a valid tab is active, force the override on THAT specific tab
+        if (targetIdx !== -1 && projects[targetIdx]) {
+            // Update the tab's name in memory to match the newly selected sheet
+            projects[targetIdx].name = currentSheetName;
+            
+            // Trigger your override modal targeted exactly at the active cuboid
+            showConflictModal(currentSheetName, targetIdx, newRawData);
         } else {
-            // NO CONFLICT: Create new immediately
+            // Fallback: If no cuboid is somehow active, create a new one immediately
             applyManualNew(newRawData);
         }
 
