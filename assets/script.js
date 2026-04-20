@@ -2721,20 +2721,22 @@ function parseExcelData(raw, mode) {
     return { headers, body }; 
 }
 
-function cleanHeader(text) { 
+function cleanHeader(text) {
     if (!text) return "";
-    
+
     let clean = text.trim()
-        .replace(/^"|"$/g, '') 
+        .replace(/^"|"$/g, '')
         .replace(/\s*max\s+\d+\s*(digits|chars|characters|digit)/gi, "")
         .replace(/_/g, " ")
         .replace(/[\r\n]+/g, " ")
-        .replace(/\s*\([^\)]*\)/g, "") 
+        .replace(/\s*\([^\)]*\)/g, "")  // Removes data inside ( )
+        .replace(/\s*\[[^\]]*\]/g, "")  // Removes data inside [ ]
+        .replace(/\s*\{[^\}]*\}/g, "")  // Removes data inside { }
         .replace(/\*/g, "")
-        .trim(); 
-    
-    if(clean.includes("SIZEStyle")) return "Style"; 
-    
+        .trim();
+
+    if (clean.includes("SIZEStyle")) return "Style";
+
     return clean;
 }
 
