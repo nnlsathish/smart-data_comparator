@@ -1508,9 +1508,17 @@ function renderSinglePreview(containerId, countId, data, side) {
     const btnColor = isShowingHidden ? "#3b82f6" : "#64748b";
     const stickyStyle = "padding: 8px 10px; display:flex; justify-content:space-between; align-items:center; position: sticky; left: 0; background: #fff; z-index: 20; border-bottom: 1px solid #f1f5f9; width: fit-content; min-width:100%; border-right: 1px solid #e2e8f0; box-shadow: 2px 0 5px rgba(0,0,0,0.05);";
 
+    // ⚡ FIX: Added the "Merge Cols" button to the toolbar
     let html = `
     <div style="${stickyStyle}">
-        <button onclick="toggleHiddenTable('hiddenBox-${side}', this)" style="background:none; border:none; color:${btnColor}; font-size:12px; cursor:pointer; font-weight:600;"><i class="fas ${btnIcon}"></i> ${btnText}</button>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <button onclick="toggleHiddenTable('hiddenBox-${side}', this)" style="background:none; border:none; color:${btnColor}; font-size:12px; cursor:pointer; font-weight:600;"><i class="fas ${btnIcon}"></i> ${btnText}</button>
+            
+            <div style="width:1px; height:14px; background:#cbd5e1;"></div>
+            
+            <button onclick="stitchColumns('${side}')" style="background:#f8fafc; color:#475569; border:1px solid #cbd5e1; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; transition:0.2s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'"><i class="fas fa-link"></i> Merge Cols</button>
+        </div>
+        
         <div style="display:flex; align-items:center; gap:10px;">
             <span style="font-size:11px; color:#64748b; font-weight:600; display:none;" id="undoBadge${side}"><i class="fas fa-undo"></i> Ctrl+Z to Undo</span>
             <button onclick="addNewRow('${side}')" style="background:#10b981; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;"><i class="fas fa-plus"></i> Add Row</button>
@@ -2158,13 +2166,10 @@ function renderDashboard() {
     const p = projects[activeProjectIdx]; 
     const doTrim = document.getElementById('chkTrimResults')?.checked || false;
     
-    // Safety Check: Handle Demo Mode or Missing Data
+    // Safety Check
     if (!p.dataA || !p.dataB) {
-        // Use diffCards (matching your HTML) instead of summaryCards
         const diffCards = document.getElementById('diffCards');
-        if (diffCards) {
-            diffCards.innerHTML = `<div class="field-card" style="border-left: 4px solid #ccc; width:100%"><div class="fc-head">Demo Mode</div><div class="fc-stats" style="color:#666">No Data Loaded Yet</div></div>`;
-        }
+        if (diffCards) diffCards.innerHTML = `<div class="field-card" style="border-left: 4px solid #ccc; width:100%"><div class="fc-head">Demo Mode</div><div class="fc-stats" style="color:#666">No Data Loaded Yet</div></div>`;
         document.getElementById('globalStats').innerHTML = `<div class="big-stat"><div class="bs-val" style="color:#ccc">0</div><div class="bs-lbl">Rows</div></div>`;
         renderResultTables(0, doTrim);
         return;
@@ -2172,28 +2177,53 @@ function renderDashboard() {
 
     const stats = calculateStats(p, doTrim);
     p.summary = stats;
-    
     const maxRows = Math.max(p.dataA.body.length, p.dataB.body.length); 
+
+    // ==========================================
+    // ⚡ SMART COLUMN HEALTH MATH (Ignores Empty Cols) ⚡
+    // ==========================================
     
-    // Ensure we are targeting the correct element from your HTML file
+    // Helper to check if a column actually has any data in it
+    const colHasData = (dataObj, colIdx) => {
+        if (!dataObj || !dataObj.body) return false;
+        return dataObj.body.some(row => row[colIdx] !== null && row[colIdx] !== undefined && String(row[colIdx]).trim() !== "");
+    };
+
+    // 1. Calculate Active FORM Columns (Only ones with data)
+    let activeFormCols = 0, mappedFormCols = 0;
+    p.dataA.headers.forEach((h, i) => {
+        if (colHasData(p.dataA, i)) {
+            activeFormCols++;
+            if (p.mapping.some(m => m.targetType === 'source' && m.targetVal === i)) mappedFormCols++;
+        }
+    });
+    const unmappedFormCols = activeFormCols - mappedFormCols;
+
+    // 2. Calculate Active CPQ Columns (Ignore specific names AND empty columns)
+    const ignoreCPQList = ['adjusted quantity', 'layout1'];
+    let activeCPQCols = 0, mappedCPQCols = 0;
+    p.dataB.headers.forEach((h, i) => {
+        const cleanHeader = String(h || "").toLowerCase().trim();
+        if (!ignoreCPQList.includes(cleanHeader) && colHasData(p.dataB, i)) {
+            activeCPQCols++;
+            if (p.mapping.some(m => m.idxB === i)) mappedCPQCols++;
+        }
+    });
+    const unmappedCPQCols = activeCPQCols - mappedCPQCols;
+    const totalMapped = p.mapping.length;
+
+    // ==========================================
+
     let diffCards = document.getElementById('diffCards');
-    
-    // Fallback: Create the container if it doesn't exist for some reason
     if (!diffCards) {
         diffCards = document.createElement('div');
         diffCards.id = 'diffCards';
         diffCards.className = 'cards-grid';
-        // Insert it before the tables grid
         const tablesGrid = document.querySelector('.tables-grid');
-        if (tablesGrid && tablesGrid.parentNode) {
-            tablesGrid.parentNode.insertBefore(diffCards, tablesGrid);
-        }
+        if (tablesGrid && tablesGrid.parentNode) tablesGrid.parentNode.insertBefore(diffCards, tablesGrid);
     }
     
-    // Clear previous results
     diffCards.innerHTML = ""; 
-    
-    // Track if any mismatches are found to decide whether to show the "Success" message
     let hasMismatches = false;
     
     p.mapping.forEach(map => { 
@@ -2209,10 +2239,7 @@ function renderDashboard() {
             if(doTrim) { vB = vB.replace(/\s+/g, ''); vA = vA.replace(/\s+/g, ''); } 
             else { vB = vB.trim(); vA = vA.trim(); }
 
-            let normA = vA.toLowerCase();
-            let normB = vB.toLowerCase(); 
-            let equal = false; 
-            
+            let normA = vA.toLowerCase(), normB = vB.toLowerCase(), equal = false; 
             if (isPrice) equal = (normA.replace(/[$,]/g,'') === normB.replace(/[$,]/g,'')); 
             else if (isQty) equal = (normA.replace(/[\,]/g,'') === normB.replace(/[\,]/g,'')); 
             else equal = (normA === normB); 
@@ -2220,16 +2247,12 @@ function renderDashboard() {
             if (equal) match++; else miss++; 
         } 
         
-        // --- LOGIC CHANGE: Only render the card if mismatches > 0 ---
         if (miss > 0) {
             hasMismatches = true;
-            // Since we only show errors, we use the warning color
-            const cls = 'bg-warn'; 
-            diffCards.innerHTML += `<div class="field-card ${cls}"><div class="fc-head">${map.name}</div><div class="fc-stats"><span style="color:#10b981">✓ ${match}</span><span style="color:#ef4444">✗ ${miss}</span></div></div>`; 
+            diffCards.innerHTML += `<div class="field-card bg-warn"><div class="fc-head">${map.name}</div><div class="fc-stats"><span style="color:#10b981">✓ ${match}</span><span style="color:#ef4444">✗ ${miss}</span></div></div>`; 
         }
     }); 
     
-    // --- LOGIC CHANGE: Show Success Message if no mismatches were added ---
     if (!hasMismatches) {
         diffCards.innerHTML = `
             <div style="grid-column: 1 / -1; text-align: center; padding: 40px; background: white; border-radius: 12px; border: 1px solid #bbf7d0; display:flex; flex-direction:column; align-items:center;">
@@ -2240,11 +2263,45 @@ function renderDashboard() {
     }
     
     document.getElementById('globalStats').innerHTML = `
-        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${maxRows}</div><div class="bs-lbl">Rows</div></div>
-        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${p.mapping.length}</div><div class="bs-lbl">Fields</div></div>
+        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${maxRows}</div><div class="bs-lbl">Rows Tested</div></div>
+        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${p.mapping.length}</div><div class="bs-lbl">Fields Checked</div></div>
         <div class="big-stat"><div class="bs-val" style="color:#10b981">${stats.matches}</div><div class="bs-lbl">Matches</div></div>
         <div class="big-stat"><div class="bs-val" style="color:#ef4444">${stats.mismatches}</div><div class="bs-lbl">Mismatches</div></div>`; 
     
+    // Inject Health Banner
+    let colHealthBanner = document.getElementById('colHealthBanner');
+    if (!colHealthBanner) {
+        colHealthBanner = document.createElement('div');
+        colHealthBanner.id = 'colHealthBanner';
+        const globalStatsNode = document.getElementById('globalStats');
+        globalStatsNode.parentNode.insertBefore(colHealthBanner, globalStatsNode.nextSibling);
+    }
+
+    colHealthBanner.innerHTML = `
+        <div style="display:flex; justify-content:space-between; background: #f8fafc; border: 1px solid #cbd5e1; padding: 15px 20px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); align-items: center;">
+            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
+                <div style="font-size: 22px; font-weight: 800; color: #3b82f6;">${activeFormCols}</div>
+                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Active Form Cols</div>
+            </div>
+            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
+                <div style="font-size: 22px; font-weight: 800; color: #10b981;">${activeCPQCols}</div>
+                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Active CPQ Cols</div>
+            </div>
+            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
+                <div style="font-size: 22px; font-weight: 800; color: #8b5cf6;">${totalMapped}</div>
+                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Mapped</div>
+            </div>
+            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
+                <div style="display: inline-block; padding: 2px 15px; border-radius: 6px; font-size: 22px; font-weight: 800; background: ${unmappedFormCols > 0 ? '#fee2e2' : 'transparent'}; color: ${unmappedFormCols > 0 ? '#b91c1c' : '#64748b'}; border: 1px solid ${unmappedFormCols > 0 ? '#fca5a5' : 'transparent'};">${unmappedFormCols}</div>
+                <div style="font-size: 11px; font-weight: 700; color: ${unmappedFormCols > 0 ? '#ef4444' : '#64748b'}; text-transform: uppercase; margin-top: 4px;">Unmapped Form</div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <div style="display: inline-block; padding: 2px 15px; border-radius: 6px; font-size: 22px; font-weight: 800; background: ${unmappedCPQCols > 0 ? '#fee2e2' : 'transparent'}; color: ${unmappedCPQCols > 0 ? '#b91c1c' : '#64748b'}; border: 1px solid ${unmappedCPQCols > 0 ? '#fca5a5' : 'transparent'};">${unmappedCPQCols}</div>
+                <div style="font-size: 11px; font-weight: 700; color: ${unmappedCPQCols > 0 ? '#ef4444' : '#64748b'}; text-transform: uppercase; margin-top: 4px;">Unmapped CPQ</div>
+            </div>
+        </div>
+    `;
+
     renderResultTables(maxRows, doTrim); 
 }
 
@@ -2278,8 +2335,52 @@ function calculateStats(p, doTrim) {
 function showAnalysisReport(p, doTrim) {
     const stats = calculateStats(p, doTrim);
     
+    // ==========================================
+    // ⚡ SMART COLUMN HEALTH MATH (Ignores Empty Cols) ⚡
+    // ==========================================
+    const colHasData = (dataObj, colIdx) => {
+        if (!dataObj || !dataObj.body) return false;
+        return dataObj.body.some(row => row[colIdx] !== null && row[colIdx] !== undefined && String(row[colIdx]).trim() !== "");
+    };
+
+    let activeFormCols = 0, mappedFormCols = 0;
+    p.dataA.headers.forEach((h, i) => {
+        if (colHasData(p.dataA, i)) {
+            activeFormCols++;
+            if (p.mapping.some(m => m.targetType === 'source' && m.targetVal === i)) mappedFormCols++;
+        }
+    });
+    const unmappedFormCols = activeFormCols - mappedFormCols;
+
+    const ignoreCPQList = ['adjusted quantity', 'layout1'];
+    let activeCPQCols = 0, mappedCPQCols = 0;
+    p.dataB.headers.forEach((h, i) => {
+        const cleanHeader = String(h || "").toLowerCase().trim();
+        if (!ignoreCPQList.includes(cleanHeader) && colHasData(p.dataB, i)) {
+            activeCPQCols++;
+            if (p.mapping.some(m => m.idxB === i)) mappedCPQCols++;
+        }
+    });
+    const unmappedCPQCols = activeCPQCols - mappedCPQCols;
+    const totalUnmapped = unmappedFormCols + unmappedCPQCols;
+    // ==========================================
+
+    let unmappedWarning = "";
+    if (totalUnmapped > 0) {
+        unmappedWarning = `
+            <div style="background: #fee2e2; border: 1px solid #ef4444; border-left: 5px solid #b91c1c; padding: 12px 15px; border-radius: 6px; margin-bottom: 20px; text-align: left;">
+                <strong style="color: #b91c1c; font-size: 15px;"><i class="fas fa-exclamation-triangle"></i> Warning: Unmapped Columns Detected</strong>
+                <div style="color: #991b1b; font-size: 13px; margin-top: 5px;">
+                    You left <strong>${unmappedFormCols} active Form</strong> column(s) and <strong>${unmappedCPQCols} active CPQ</strong> column(s) unmapped.
+                </div>
+            </div>
+        `;
+        setTimeout(() => showToast(`⚠️ ${totalUnmapped} columns left unmapped!`), 600);
+    }
+
     if (stats.mismatches === 0) {
         const successHtml = `
+            ${unmappedWarning}
             <div style="text-align:center;">
                 <p style="font-size: 15px; margin-bottom: 20px; color: #374151;">
                     All <strong>${p.dataA.body.length}</strong> rows match perfectly across all columns.
@@ -2289,63 +2390,39 @@ function showAnalysisReport(p, doTrim) {
                 </div>
             </div>
         `;
-        showModal("Analysis Complete: Perfect Match!", successHtml, 'success');
+        showModal(totalUnmapped > 0 ? "Analysis Complete (With Warnings)" : "Analysis Complete: Perfect Match!", successHtml, totalUnmapped > 0 ? 'warning' : 'success');
         return;
     }
 
     let tableRows = "";
-    
     p.mapping.forEach(map => {
         let colErrorCount = 0;
         const totalRows = p.dataA.body.length;
 
         for (let i = 0; i < totalRows; i++) {
-            let valA = map.targetType === 'matrix' 
-                ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") 
-                : (p.dataA.body[i]?.[map.targetVal] || "").toString();
-
+            let valA = map.targetType === 'matrix' ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") : (p.dataA.body[i]?.[map.targetVal] || "").toString();
             let valB = (p.dataB.body[i]?.[map.idxB] || "").toString();
 
-            if (doTrim) {
-                valA = valA.replace(/\s+/g, '');
-                valB = valB.replace(/\s+/g, '');
-            } else {
-                valA = valA.trim();
-                valB = valB.trim();
-            }
+            if (doTrim) { valA = valA.replace(/\s+/g, ''); valB = valB.replace(/\s+/g, ''); } 
+            else { valA = valA.trim(); valB = valB.trim(); }
 
-            const lowerName = map.name.toLowerCase();
-            const isPrice = /price|cost|retail/i.test(lowerName);
-            const isQty = /qty|quantity/i.test(lowerName);
-
-            let equal = false;
-            if (isPrice) {
-                equal = (valA.toLowerCase().replace(/[$,]/g, '') === valB.toLowerCase().replace(/[$,]/g, ''));
-            } else if (isQty) {
-                equal = (valA.toLowerCase().replace(/[\,\s]/g, '') === valB.toLowerCase().replace(/[\,\s]/g, ''));
-            } else {
-                equal = (valA.toLowerCase() === valB.toLowerCase());
-            }
+            let normA = valA.toLowerCase(), normB = valB.toLowerCase(), equal = false;
+            if (/price|cost|retail/i.test(map.name.toLowerCase())) equal = (normA.replace(/[$,]/g, '') === normB.replace(/[$,]/g, ''));
+            else if (/qty|quantity/i.test(map.name.toLowerCase())) equal = (normA.replace(/[\,\s]/g, '') === normB.replace(/[\,\s]/g, ''));
+            else equal = (normA === normB);
 
             if (!equal) colErrorCount++;
         }
 
         if (colErrorCount > 0) {
-            tableRows += `
-                <tr>
-                    <td style="padding:10px; border-bottom:1px solid #f3f4f6; color:#374151;">${map.name}</td>
-                    <td style="padding:10px; border-bottom:1px solid #f3f4f6; text-align:right; font-weight:bold; color:#ef4444;">${colErrorCount}</td>
-                </tr>
-            `;
+            tableRows += `<tr><td style="padding:10px; border-bottom:1px solid #f3f4f6; color:#374151;">${map.name}</td><td style="padding:10px; border-bottom:1px solid #f3f4f6; text-align:right; font-weight:bold; color:#ef4444;">${colErrorCount}</td></tr>`;
         }
     });
 
     const reportHtml = `
+        ${unmappedWarning}
         <div style="text-align:left;">
-            <p style="margin-bottom: 15px; font-size:15px; color:#374151;">
-                Found <strong>${stats.mismatches}</strong> total mismatches in <strong>${p.dataA.body.length}</strong> rows.
-            </p>
-            
+            <p style="margin-bottom: 15px; font-size:15px; color:#374151;">Found <strong>${stats.mismatches}</strong> total mismatches in <strong>${p.dataA.body.length}</strong> rows.</p>
             <div style="max-height: 300px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:6px;">
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
                     <thead style="position:sticky; top:0; background:#f9fafb;">
@@ -2354,9 +2431,7 @@ function showAnalysisReport(p, doTrim) {
                             <th style="text-align:right; padding:10px; font-weight:600;">Mismatches</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        ${tableRows}
-                    </tbody>
+                    <tbody>${tableRows}</tbody>
                 </table>
             </div>
         </div>
@@ -4821,4 +4896,63 @@ function getVisibleExcelData(sheet) {
     }
 
     return data;
+}
+
+// ==========================================
+// ⚡ MERGE COLUMNS (STITCHER) ⚡
+// ==========================================
+
+function stitchColumns(side) {
+    // 1. Get the highlighted cells
+    let start = typeof GridEngine !== 'undefined' ? GridEngine.selStart : excelSelStart;
+    let end = typeof GridEngine !== 'undefined' ? GridEngine.selEnd : excelSelEnd;
+
+    if (!start || !end) return showModal("No Selection", "Please click and drag to highlight the columns you want to merge.", "warning");
+
+    let cMin = Math.min(start.c, end.c);
+    let cMax = Math.max(start.c, end.c);
+
+    if (cMin === cMax) return showModal("Invalid Selection", "Please highlight at least TWO columns to stitch them together.", "warning");
+
+    const p = projects[activeProjectIdx];
+    const data = (side === 'A') ? p.dataA : p.dataB;
+
+    // Save for Undo (Ctrl+Z support)
+    if (typeof GridEngine !== 'undefined' && GridEngine.saveState) GridEngine.saveState(side);
+
+    // 2. Stitch Data in Body (Glues the digits together and deletes the ghost columns)
+    data.body.forEach(row => {
+        let stitchedValue = "";
+        for (let c = cMin; c <= cMax; c++) {
+            stitchedValue += String(row[c] || "").trim();
+        }
+        row[cMin] = stitchedValue; 
+        row.splice(cMin + 1, cMax - cMin); // Destroy the empty leftover columns
+    });
+
+    // 3. Stitch Data in Hidden Rows (Keeps everything perfectly aligned)
+    if (data.hiddenRows) {
+        data.hiddenRows.forEach(item => {
+            let row = item.data;
+            let stitchedValue = "";
+            for (let c = cMin; c <= cMax; c++) {
+                stitchedValue += String(row[c] || "").trim();
+            }
+            row[cMin] = stitchedValue;
+            row.splice(cMin + 1, cMax - cMin);
+        });
+    }
+
+    // 4. Clean up the Headers
+    let newHeaderName = data.headers[cMin] || "Merged Data";
+    if (newHeaderName.toLowerCase().startsWith("column ")) newHeaderName = "Merged Barcode"; 
+    data.headers[cMin] = newHeaderName;
+    data.headers.splice(cMin + 1, cMax - cMin);
+
+    // Clear UI selection
+    if (typeof GridEngine !== 'undefined') { GridEngine.selStart = null; GridEngine.selEnd = null; }
+    if (typeof excelSelStart !== 'undefined') { excelSelStart = null; excelSelEnd = null; }
+
+    renderPreviewTables();
+    showToast(`Stitched ${cMax - cMin + 1} columns into one!`);
 }
