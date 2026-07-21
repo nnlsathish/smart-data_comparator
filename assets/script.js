@@ -2166,278 +2166,1555 @@ function renderDashboard() {
     const p = projects[activeProjectIdx]; 
     const doTrim = document.getElementById('chkTrimResults')?.checked || false;
     
-    // Safety Check
+    // =========================================================
+    // SAFETY CHECK
+    // =========================================================
+    
     if (!p.dataA || !p.dataB) {
         const diffCards = document.getElementById('diffCards');
-        if (diffCards) diffCards.innerHTML = `<div class="field-card" style="border-left: 4px solid #ccc; width:100%"><div class="fc-head">Demo Mode</div><div class="fc-stats" style="color:#666">No Data Loaded Yet</div></div>`;
-        document.getElementById('globalStats').innerHTML = `<div class="big-stat"><div class="bs-val" style="color:#ccc">0</div><div class="bs-lbl">Rows</div></div>`;
+        
+        if (diffCards) {
+            diffCards.innerHTML = `
+                <div class="field-card" style="border-left: 4px solid #ccc; width:100%">
+                    <div class="fc-head">Demo Mode</div>
+                    <div class="fc-stats" style="color:#666">
+                        No Data Loaded Yet
+                    </div>
+                </div>
+            `;
+        }
+        
+        document.getElementById('globalStats').innerHTML = `
+            <div class="big-stat">
+                <div class="bs-val" style="color:#ccc">0</div>
+                <div class="bs-lbl">Rows</div>
+            </div>
+        `;
+        
         renderResultTables(0, doTrim);
         return;
     }
 
+
+    // =========================================================
+    // CALCULATE MAIN STATISTICS
+    // =========================================================
+    
     const stats = calculateStats(p, doTrim);
     p.summary = stats;
-    const maxRows = Math.max(p.dataA.body.length, p.dataB.body.length); 
-
-    // ==========================================
-    // ⚡ SMART COLUMN HEALTH MATH (Ignores Empty Cols) ⚡
-    // ==========================================
     
-    // Helper to check if a column actually has any data in it
+    const maxRows = Math.max(
+        p.dataA.body.length,
+        p.dataB.body.length
+    );
+
+
+    // =========================================================
+    // FIND CURRENCY COLUMN
+    // =========================================================
+    
+    const currIdxB = p.dataB.headers.findIndex(h =>
+        /currency/i.test(String(h))
+    );
+
+
+    // =========================================================
+    // SMART COLUMN HEALTH MATH
+    // =========================================================
+    
     const colHasData = (dataObj, colIdx) => {
         if (!dataObj || !dataObj.body) return false;
-        return dataObj.body.some(row => row[colIdx] !== null && row[colIdx] !== undefined && String(row[colIdx]).trim() !== "");
+        
+        return dataObj.body.some(row =>
+            row[colIdx] !== null &&
+            row[colIdx] !== undefined &&
+            String(row[colIdx]).trim() !== ""
+        );
     };
 
-    // 1. Calculate Active FORM Columns (Only ones with data)
-    let activeFormCols = 0, mappedFormCols = 0;
+
+    // =========================================================
+    // ACTIVE FORM COLUMNS
+    // =========================================================
+    
+    let activeFormCols = 0;
+    let mappedFormCols = 0;
+    
     p.dataA.headers.forEach((h, i) => {
+        
         if (colHasData(p.dataA, i)) {
+            
             activeFormCols++;
-            if (p.mapping.some(m => m.targetType === 'source' && m.targetVal === i)) mappedFormCols++;
+            
+            if (
+                p.mapping.some(
+                    m => m.targetType === 'source' &&
+                         m.targetVal === i
+                )
+            ) {
+                mappedFormCols++;
+            }
         }
     });
-    const unmappedFormCols = activeFormCols - mappedFormCols;
+    
+    const unmappedFormCols =
+        activeFormCols - mappedFormCols;
 
-    // 2. Calculate Active CPQ Columns (Ignore specific names AND empty columns)
-    const ignoreCPQList = ['adjusted quantity', 'layout1'];
-    let activeCPQCols = 0, mappedCPQCols = 0;
+
+    // =========================================================
+    // ACTIVE CPQ COLUMNS
+    // =========================================================
+    
+    const ignoreCPQList = [
+        'adjusted quantity',
+        'layout1'
+    ];
+    
+    let activeCPQCols = 0;
+    let mappedCPQCols = 0;
+    
     p.dataB.headers.forEach((h, i) => {
-        const cleanHeader = String(h || "").toLowerCase().trim();
-        if (!ignoreCPQList.includes(cleanHeader) && colHasData(p.dataB, i)) {
+        
+        const cleanHeader =
+            String(h || "").toLowerCase().trim();
+        
+        if (
+            !ignoreCPQList.includes(cleanHeader) &&
+            colHasData(p.dataB, i)
+        ) {
+            
             activeCPQCols++;
-            if (p.mapping.some(m => m.idxB === i)) mappedCPQCols++;
+            
+            if (
+                p.mapping.some(
+                    m => m.idxB === i
+                )
+            ) {
+                mappedCPQCols++;
+            }
         }
     });
-    const unmappedCPQCols = activeCPQCols - mappedCPQCols;
-    const totalMapped = p.mapping.length;
+    
+    const unmappedCPQCols =
+        activeCPQCols - mappedCPQCols;
+    
+    const totalMapped =
+        p.mapping.length;
 
-    // ==========================================
 
-    let diffCards = document.getElementById('diffCards');
+    // =========================================================
+    // CREATE / FIND MISMATCH CARDS CONTAINER
+    // =========================================================
+    
+    let diffCards =
+        document.getElementById('diffCards');
+    
     if (!diffCards) {
-        diffCards = document.createElement('div');
-        diffCards.id = 'diffCards';
-        diffCards.className = 'cards-grid';
-        const tablesGrid = document.querySelector('.tables-grid');
-        if (tablesGrid && tablesGrid.parentNode) tablesGrid.parentNode.insertBefore(diffCards, tablesGrid);
+        
+        diffCards =
+            document.createElement('div');
+        
+        diffCards.id =
+            'diffCards';
+        
+        diffCards.className =
+            'cards-grid';
+        
+        const tablesGrid =
+            document.querySelector('.tables-grid');
+        
+        if (
+            tablesGrid &&
+            tablesGrid.parentNode
+        ) {
+            tablesGrid.parentNode.insertBefore(
+                diffCards,
+                tablesGrid
+            );
+        }
     }
     
-    diffCards.innerHTML = ""; 
-    let hasMismatches = false;
     
-    p.mapping.forEach(map => { 
-        let match = 0, miss = 0; 
-        const lowerName = map.name.toLowerCase();
-        const isPrice = /price|cost|retail/i.test(lowerName);
-        const isQty = /qty|quantity/i.test(lowerName); 
-        
-        for (let i = 0; i < maxRows; i++) { 
-            let vB = (p.dataB.body[i]?.[map.idxB] || "").toString(); 
-            let vA = map.targetType === 'matrix' ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") : (p.dataA.body[i]?.[map.targetVal] || "").toString(); 
-            
-            if(doTrim) { vB = vB.replace(/\s+/g, ''); vA = vA.replace(/\s+/g, ''); } 
-            else { vB = vB.trim(); vA = vA.trim(); }
+    diffCards.innerHTML = "";
+    
+    let hasMismatches = false;
 
-            let normA = vA.toLowerCase(), normB = vB.toLowerCase(), equal = false; 
-            if (isPrice) equal = (normA.replace(/[$,]/g,'') === normB.replace(/[$,]/g,'')); 
-            else if (isQty) equal = (normA.replace(/[\,]/g,'') === normB.replace(/[\,]/g,'')); 
-            else equal = (normA === normB); 
+
+    // =========================================================
+    // NORMAL MAPPED COLUMN VALIDATION
+    // =========================================================
+    
+    p.mapping.forEach(map => {
+        
+        let match = 0;
+        let miss = 0;
+        
+        const lowerName =
+            map.name.toLowerCase();
+        
+        const isPrice =
+            /price|cost|retail/i.test(
+                lowerName
+            );
+        
+        const isQty =
+            /qty|quantity/i.test(
+                lowerName
+            );
+        
+        
+        for (
+            let i = 0;
+            i < maxRows;
+            i++
+        ) {
             
-            if (equal) match++; else miss++; 
-        } 
+            let vB = (
+                p.dataB.body[i]?.[map.idxB] ||
+                ""
+            ).toString();
+            
+            let vA =
+                map.targetType === 'matrix'
+                ? (
+                    p.matrix.find(
+                        m => m.key === map.targetVal
+                    )?.val || ""
+                )
+                : (
+                    p.dataA.body[i]?.[map.targetVal] ||
+                    ""
+                ).toString();
+            
+            
+            if (doTrim) {
+                vB = vB.replace(/\s+/g, '');
+                vA = vA.replace(/\s+/g, '');
+            } else {
+                vB = vB.trim();
+                vA = vA.trim();
+            }
+            
+            
+            let normA =
+                vA.toLowerCase();
+            
+            let normB =
+                vB.toLowerCase();
+            
+            let equal = false;
+            
+            
+            if (isPrice) {
+                
+                equal =
+                    normA.replace(/[$,]/g, '') ===
+                    normB.replace(/[$,]/g, '');
+                
+            } else if (isQty) {
+                
+                equal =
+                    normA.replace(/[\,]/g, '') ===
+                    normB.replace(/[\,]/g, '');
+                
+            } else {
+                
+                equal =
+                    normA === normB;
+            }
+            
+            
+            // IMPORTANT:
+            // Currency Missing is NOT added here.
+            // Price/Retail remains MATCH if the value matches.
+            
+            if (equal) {
+                match++;
+            } else {
+                miss++;
+            }
+        }
+        
         
         if (miss > 0) {
+            
             hasMismatches = true;
-            diffCards.innerHTML += `<div class="field-card bg-warn"><div class="fc-head">${map.name}</div><div class="fc-stats"><span style="color:#10b981">✓ ${match}</span><span style="color:#ef4444">✗ ${miss}</span></div></div>`; 
+            
+            diffCards.innerHTML += `
+                <div class="field-card bg-warn">
+                    <div class="fc-head">
+                        ${map.name}
+                    </div>
+                    
+                    <div class="fc-stats">
+                        <span style="color:#10b981">
+                            ✓ ${match}
+                        </span>
+                        
+                        <span style="color:#ef4444">
+                            ✗ ${miss}
+                        </span>
+                    </div>
+                </div>
+            `;
         }
-    }); 
+    });
+
+
+    // =========================================================
+    // SEPARATE MISSING CURRENCY VALIDATION
+    // =========================================================
     
-    if (!hasMismatches) {
-        diffCards.innerHTML = `
-            <div style="grid-column: 1 / -1; text-align: center; padding: 40px; background: white; border-radius: 12px; border: 1px solid #bbf7d0; display:flex; flex-direction:column; align-items:center;">
-                <i class="fas fa-check-circle" style="font-size: 48px; color: #22c55e; margin-bottom: 15px;"></i>
-                <h3 style="margin: 0; color: #15803d; font-size: 20px;">All Fields Matched!</h3>
-                <p style="margin: 10px 0 0 0; color: #64748b;">No mismatches found in the mapped columns.</p>
-            </div>`;
-    }
+    let currencyMissingCount = 0;
     
-    document.getElementById('globalStats').innerHTML = `
-        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${maxRows}</div><div class="bs-lbl">Rows Tested</div></div>
-        <div class="big-stat"><div class="bs-val" style="color:#2563eb">${p.mapping.length}</div><div class="bs-lbl">Fields Checked</div></div>
-        <div class="big-stat"><div class="bs-val" style="color:#10b981">${stats.matches}</div><div class="bs-lbl">Matches</div></div>
-        <div class="big-stat"><div class="bs-val" style="color:#ef4444">${stats.mismatches}</div><div class="bs-lbl">Mismatches</div></div>`; 
-    
-    // Inject Health Banner
-    let colHealthBanner = document.getElementById('colHealthBanner');
-    if (!colHealthBanner) {
-        colHealthBanner = document.createElement('div');
-        colHealthBanner.id = 'colHealthBanner';
-        const globalStatsNode = document.getElementById('globalStats');
-        globalStatsNode.parentNode.insertBefore(colHealthBanner, globalStatsNode.nextSibling);
+    if (currIdxB !== -1) {
+        
+        // Find all mapped price-related fields
+        const priceMappings =
+            p.mapping.filter(map =>
+                /price|cost|retail/i.test(
+                    String(map.name).toLowerCase()
+                )
+            );
+        
+        
+        for (
+            let i = 0;
+            i < maxRows;
+            i++
+        ) {
+            
+            // Currency value
+            const currencyValue =
+                String(
+                    p.dataB.body[i]?.[currIdxB] ||
+                    ""
+                ).trim();
+            
+            
+            // Check only if currency is missing
+            if (currencyValue !== "") {
+                continue;
+            }
+            
+            
+            // Check if any price-related field
+            // contains a positive value
+            let hasValidPrice =
+                priceMappings.some(map => {
+                    
+                    const priceValue =
+                        String(
+                            p.dataB.body[i]?.[map.idxB] ||
+                            ""
+                        );
+                    
+                    const num =
+                        parseFloat(
+                            priceValue.replace(
+                                /[^0-9.-]/g,
+                                ''
+                            )
+                        );
+                    
+                    return (
+                        !isNaN(num) &&
+                        num > 0
+                    );
+                });
+            
+            
+            if (hasValidPrice) {
+                currencyMissingCount++;
+            }
+        }
     }
 
-    colHealthBanner.innerHTML = `
-        <div style="display:flex; justify-content:space-between; background: #f8fafc; border: 1px solid #cbd5e1; padding: 15px 20px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); align-items: center;">
-            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
-                <div style="font-size: 22px; font-weight: 800; color: #3b82f6;">${activeFormCols}</div>
-                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Active Form Cols</div>
+
+    // =========================================================
+    // ADD CURRENCY AS A SEPARATE MISMATCH CARD
+    // =========================================================
+    
+    if (currencyMissingCount > 0) {
+        
+        hasMismatches = true;
+        
+        diffCards.innerHTML += `
+            <div class="field-card bg-warn">
+                <div class="fc-head">
+                    Currency
+                </div>
+                
+                <div class="fc-stats">
+                    <span style="color:#10b981">
+                        ✓ 0
+                    </span>
+                    
+                    <span style="color:#ef4444">
+                        ✗ ${currencyMissingCount}
+                    </span>
+                </div>
+                
+                <div style="
+                    margin-top:8px;
+                    font-size:12px;
+                    color:#ef4444;
+                    font-weight:600;
+                ">
+                    Missing Currency
+                </div>
             </div>
-            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
-                <div style="font-size: 22px; font-weight: 800; color: #10b981;">${activeCPQCols}</div>
-                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Active CPQ Cols</div>
+        `;
+    }
+
+
+    // =========================================================
+    // SHOW ALL MATCHED ONLY IF THERE ARE NO MISMATCHES
+    // =========================================================
+    
+    if (!hasMismatches) {
+        
+        diffCards.innerHTML = `
+            <div style="
+                grid-column:1 / -1;
+                text-align:center;
+                padding:40px;
+                background:white;
+                border-radius:12px;
+                border:1px solid #bbf7d0;
+                display:flex;
+                flex-direction:column;
+                align-items:center;
+            ">
+                <i
+                    class="fas fa-check-circle"
+                    style="
+                        font-size:48px;
+                        color:#22c55e;
+                        margin-bottom:15px;
+                    "
+                ></i>
+                
+                <h3 style="
+                    margin:0;
+                    color:#15803d;
+                    font-size:20px;
+                ">
+                    All Fields Matched!
+                </h3>
+                
+                <p style="
+                    margin:10px 0 0 0;
+                    color:#64748b;
+                ">
+                    No mismatches found in the mapped columns.
+                </p>
             </div>
-            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
-                <div style="font-size: 22px; font-weight: 800; color: #8b5cf6;">${totalMapped}</div>
-                <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 4px;">Mapped</div>
+        `;
+    }
+
+
+    // =========================================================
+    // GLOBAL STATS
+    // =========================================================
+    
+    document.getElementById(
+        'globalStats'
+    ).innerHTML = `
+        <div class="big-stat">
+            <div class="bs-val"
+                style="color:#2563eb">
+                ${maxRows}
             </div>
-            <div style="text-align: center; flex: 1; border-right: 1px solid #e2e8f0;">
-                <div style="display: inline-block; padding: 2px 15px; border-radius: 6px; font-size: 22px; font-weight: 800; background: ${unmappedFormCols > 0 ? '#fee2e2' : 'transparent'}; color: ${unmappedFormCols > 0 ? '#b91c1c' : '#64748b'}; border: 1px solid ${unmappedFormCols > 0 ? '#fca5a5' : 'transparent'};">${unmappedFormCols}</div>
-                <div style="font-size: 11px; font-weight: 700; color: ${unmappedFormCols > 0 ? '#ef4444' : '#64748b'}; text-transform: uppercase; margin-top: 4px;">Unmapped Form</div>
+            <div class="bs-lbl">
+                Rows Tested
             </div>
-            <div style="text-align: center; flex: 1;">
-                <div style="display: inline-block; padding: 2px 15px; border-radius: 6px; font-size: 22px; font-weight: 800; background: ${unmappedCPQCols > 0 ? '#fee2e2' : 'transparent'}; color: ${unmappedCPQCols > 0 ? '#b91c1c' : '#64748b'}; border: 1px solid ${unmappedCPQCols > 0 ? '#fca5a5' : 'transparent'};">${unmappedCPQCols}</div>
-                <div style="font-size: 11px; font-weight: 700; color: ${unmappedCPQCols > 0 ? '#ef4444' : '#64748b'}; text-transform: uppercase; margin-top: 4px;">Unmapped CPQ</div>
+        </div>
+        
+        <div class="big-stat">
+            <div class="bs-val"
+                style="color:#2563eb">
+                ${p.mapping.length}
+            </div>
+            <div class="bs-lbl">
+                Fields Checked
+            </div>
+        </div>
+        
+        <div class="big-stat">
+            <div class="bs-val"
+                style="color:#10b981">
+                ${stats.matches}
+            </div>
+            <div class="bs-lbl">
+                Matches
+            </div>
+        </div>
+        
+        <div class="big-stat">
+            <div class="bs-val"
+                style="color:#ef4444">
+                ${stats.mismatches}
+            </div>
+            <div class="bs-lbl">
+                Mismatches
             </div>
         </div>
     `;
 
-    renderResultTables(maxRows, doTrim); 
+
+    // =========================================================
+    // HEALTH BANNER
+    // =========================================================
+    
+    let colHealthBanner =
+        document.getElementById(
+            'colHealthBanner'
+        );
+    
+    if (!colHealthBanner) {
+        
+        colHealthBanner =
+            document.createElement('div');
+        
+        colHealthBanner.id =
+            'colHealthBanner';
+        
+        const globalStatsNode =
+            document.getElementById(
+                'globalStats'
+            );
+        
+        globalStatsNode.parentNode.insertBefore(
+            colHealthBanner,
+            globalStatsNode.nextSibling
+        );
+    }
+    
+    
+    colHealthBanner.innerHTML = `
+        <div style="
+            display:flex;
+            justify-content:space-between;
+            background:#f8fafc;
+            border:1px solid #cbd5e1;
+            padding:15px 20px;
+            border-radius:12px;
+            margin-bottom:30px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.05);
+            align-items:center;
+        ">
+            <div style="
+                text-align:center;
+                flex:1;
+                border-right:1px solid #e2e8f0;
+            ">
+                <div style="
+                    font-size:22px;
+                    font-weight:800;
+                    color:#3b82f6;
+                ">
+                    ${activeFormCols}
+                </div>
+                
+                <div style="
+                    font-size:11px;
+                    font-weight:700;
+                    color:#64748b;
+                    text-transform:uppercase;
+                    margin-top:4px;
+                ">
+                    Active Form Cols
+                </div>
+            </div>
+            
+            <div style="
+                text-align:center;
+                flex:1;
+                border-right:1px solid #e2e8f0;
+            ">
+                <div style="
+                    font-size:22px;
+                    font-weight:800;
+                    color:#10b981;
+                ">
+                    ${activeCPQCols}
+                </div>
+                
+                <div style="
+                    font-size:11px;
+                    font-weight:700;
+                    color:#64748b;
+                    text-transform:uppercase;
+                    margin-top:4px;
+                ">
+                    Active CPQ Cols
+                </div>
+            </div>
+            
+            <div style="
+                text-align:center;
+                flex:1;
+                border-right:1px solid #e2e8f0;
+            ">
+                <div style="
+                    font-size:22px;
+                    font-weight:800;
+                    color:#8b5cf6;
+                ">
+                    ${totalMapped}
+                </div>
+                
+                <div style="
+                    font-size:11px;
+                    font-weight:700;
+                    color:#64748b;
+                    text-transform:uppercase;
+                    margin-top:4px;
+                ">
+                    Mapped
+                </div>
+            </div>
+            
+            <div style="
+                text-align:center;
+                flex:1;
+                border-right:1px solid #e2e8f0;
+            ">
+                <div style="
+                    display:inline-block;
+                    padding:2px 15px;
+                    border-radius:6px;
+                    font-size:22px;
+                    font-weight:800;
+                    background:${unmappedFormCols > 0 ? '#fee2e2' : 'transparent'};
+                    color:${unmappedFormCols > 0 ? '#b91c1c' : '#64748b'};
+                    border:1px solid ${unmappedFormCols > 0 ? '#fca5a5' : 'transparent'};
+                ">
+                    ${unmappedFormCols}
+                </div>
+                
+                <div style="
+                    font-size:11px;
+                    font-weight:700;
+                    color:${unmappedFormCols > 0 ? '#ef4444' : '#64748b'};
+                    text-transform:uppercase;
+                    margin-top:4px;
+                ">
+                    Unmapped Form
+                </div>
+            </div>
+            
+            <div style="
+                text-align:center;
+                flex:1;
+            ">
+                <div style="
+                    display:inline-block;
+                    padding:2px 15px;
+                    border-radius:6px;
+                    font-size:22px;
+                    font-weight:800;
+                    background:${unmappedCPQCols > 0 ? '#fee2e2' : 'transparent'};
+                    color:${unmappedCPQCols > 0 ? '#b91c1c' : '#64748b'};
+                    border:1px solid ${unmappedCPQCols > 0 ? '#fca5a5' : 'transparent'};
+                ">
+                    ${unmappedCPQCols}
+                </div>
+                
+                <div style="
+                    font-size:11px;
+                    font-weight:700;
+                    color:${unmappedCPQCols > 0 ? '#ef4444' : '#64748b'};
+                    text-transform:uppercase;
+                    margin-top:4px;
+                ">
+                    Unmapped CPQ
+                </div>
+            </div>
+        </div>
+    `;
+
+
+    // =========================================================
+    // RENDER RESULT TABLES
+    // =========================================================
+    
+    renderResultTables(
+        maxRows,
+        doTrim
+    );
 }
 
 function calculateStats(p, doTrim) {
-    if (!p.dataA || !p.dataB || !p.mapping) return { matches: 0, mismatches: 0 };
-    let matches = 0, mismatches = 0;
-    const rows = Math.max(p.dataA.body.length, p.dataB.body.length);
-    
-    p.mapping.forEach(map => {
-        const isPrice = /price|cost|retail/i.test(map.name.toLowerCase());
-        const isQty = /qty|quantity/i.test(map.name.toLowerCase());
-        
-        for(let i=0; i<rows; i++) {
-            let vB = (p.dataB.body[i]?.[map.idxB] || "").toString();
-            let vA = map.targetType === 'matrix' ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") : (p.dataA.body[i]?.[map.targetVal] || "").toString();
-            
-            if(doTrim) { vB = vB.replace(/\s+/g, ''); vA = vA.replace(/\s+/g, ''); } 
-            else { vB = vB.trim(); vA = vA.trim(); }
-            
-            let equal = false;
-            if (isPrice) equal = (vA.toLowerCase().replace(/[$,]/g,'') === vB.toLowerCase().replace(/[$,]/g,''));
-            else if (isQty) equal = (vA.toLowerCase().replace(/[\,\s]/g,'') === vB.toLowerCase().replace(/[\,\s]/g,''));
-            else equal = (vA.toLowerCase() === vB.toLowerCase());
-            
-            if(equal) matches++; else mismatches++;
+
+    if (
+        !p.dataA ||
+        !p.dataB ||
+        !p.mapping
+    ) {
+        return {
+            matches: 0,
+            mismatches: 0
+        };
+    }
+
+
+    let matches = 0;
+    let mismatches = 0;
+
+
+    const rows =
+        Math.max(
+            p.dataA.body.length,
+            p.dataB.body.length
+        );
+
+
+    // Find Currency column
+    const currIdxB =
+        p.dataB.headers.findIndex(
+            h =>
+                /currency/i.test(
+                    String(h)
+                )
+        );
+
+
+    // =========================================================
+    // NORMAL MAPPED FIELD VALIDATION
+    // =========================================================
+
+    p.mapping.forEach(
+        map => {
+
+            const isPrice =
+                /price|cost|retail/i.test(
+                    map.name.toLowerCase()
+                );
+
+
+            const isQty =
+                /qty|quantity/i.test(
+                    map.name.toLowerCase()
+                );
+
+
+            for (
+                let i = 0;
+                i < rows;
+                i++
+            ) {
+
+                let vB =
+                    (
+                        p.dataB.body[i]?.[
+                            map.idxB
+                        ] || ""
+                    ).toString();
+
+
+                let vA =
+                    map.targetType === 'matrix'
+                    ? (
+                        p.matrix.find(
+                            m =>
+                                m.key ===
+                                map.targetVal
+                        )?.val || ""
+                    ).toString()
+                    : (
+                        p.dataA.body[i]?.[
+                            map.targetVal
+                        ] || ""
+                    ).toString();
+
+
+                if (doTrim) {
+
+                    vB =
+                        vB.replace(
+                            /\s+/g,
+                            ''
+                        );
+
+                    vA =
+                        vA.replace(
+                            /\s+/g,
+                            ''
+                        );
+
+                } else {
+
+                    vB =
+                        vB.trim();
+
+                    vA =
+                        vA.trim();
+                }
+
+
+                let equal = false;
+
+
+                if (isPrice) {
+
+                    equal =
+                        vA
+                        .toLowerCase()
+                        .replace(
+                            /[$,]/g,
+                            ''
+                        ) ===
+                        vB
+                        .toLowerCase()
+                        .replace(
+                            /[$,]/g,
+                            ''
+                        );
+
+                } else if (isQty) {
+
+                    equal =
+                        vA
+                        .toLowerCase()
+                        .replace(
+                            /[\,\s]/g,
+                            ''
+                        ) ===
+                        vB
+                        .toLowerCase()
+                        .replace(
+                            /[\,\s]/g,
+                            ''
+                        );
+
+                } else {
+
+                    equal =
+                        vA.toLowerCase() ===
+                        vB.toLowerCase();
+                }
+
+
+                // Price itself remains MATCH
+                // if price values are equal.
+                if (equal) {
+                    matches++;
+                } else {
+                    mismatches++;
+                }
+            }
         }
-    });
-    return { matches, mismatches };
+    );
+
+
+    // =========================================================
+    // SEPARATE MISSING CURRENCY MISMATCH
+    // =========================================================
+
+    if (
+        currIdxB !== -1
+    ) {
+
+        const priceMappings =
+            p.mapping.filter(
+                map =>
+                    /price|cost|retail/i.test(
+                        String(
+                            map.name
+                        ).toLowerCase()
+                    )
+            );
+
+
+        for (
+            let i = 0;
+            i < rows;
+            i++
+        ) {
+
+            const currencyValue =
+                String(
+                    p.dataB.body[i]?.[
+                        currIdxB
+                    ] || ""
+                ).trim();
+
+
+            if (
+                currencyValue !== ""
+            ) {
+                continue;
+            }
+
+
+            const hasValidPrice =
+                priceMappings.some(
+                    map => {
+
+                        const priceValue =
+                            String(
+                                p.dataB.body[i]?.[
+                                    map.idxB
+                                ] || ""
+                            );
+
+
+                        const num =
+                            parseFloat(
+                                priceValue.replace(
+                                    /[^0-9.-]/g,
+                                    ''
+                                )
+                            );
+
+
+                        return (
+                            !isNaN(num) &&
+                            num > 0
+                        );
+                    }
+                );
+
+
+            if (
+                hasValidPrice
+            ) {
+
+                // Currency is a separate mismatch.
+                mismatches++;
+            }
+        }
+    }
+
+
+    return {
+        matches,
+        mismatches
+    };
 }
 
 function showAnalysisReport(p, doTrim) {
-    const stats = calculateStats(p, doTrim);
-    
-    // ==========================================
-    // ⚡ SMART COLUMN HEALTH MATH (Ignores Empty Cols) ⚡
-    // ==========================================
-    const colHasData = (dataObj, colIdx) => {
-        if (!dataObj || !dataObj.body) return false;
-        return dataObj.body.some(row => row[colIdx] !== null && row[colIdx] !== undefined && String(row[colIdx]).trim() !== "");
+
+    const stats = calculateStats(
+        p,
+        doTrim
+    );
+
+
+    // =========================================================
+    // SMART COLUMN HEALTH MATH
+    // =========================================================
+
+    const colHasData = (
+        dataObj,
+        colIdx
+    ) => {
+
+        if (
+            !dataObj ||
+            !dataObj.body
+        ) {
+            return false;
+        }
+
+        return dataObj.body.some(
+            row =>
+                row[colIdx] !== null &&
+                row[colIdx] !== undefined &&
+                String(
+                    row[colIdx]
+                ).trim() !== ""
+        );
     };
 
-    let activeFormCols = 0, mappedFormCols = 0;
-    p.dataA.headers.forEach((h, i) => {
-        if (colHasData(p.dataA, i)) {
-            activeFormCols++;
-            if (p.mapping.some(m => m.targetType === 'source' && m.targetVal === i)) mappedFormCols++;
-        }
-    });
-    const unmappedFormCols = activeFormCols - mappedFormCols;
 
-    const ignoreCPQList = ['adjusted quantity', 'layout1'];
-    let activeCPQCols = 0, mappedCPQCols = 0;
-    p.dataB.headers.forEach((h, i) => {
-        const cleanHeader = String(h || "").toLowerCase().trim();
-        if (!ignoreCPQList.includes(cleanHeader) && colHasData(p.dataB, i)) {
-            activeCPQCols++;
-            if (p.mapping.some(m => m.idxB === i)) mappedCPQCols++;
+    let activeFormCols = 0;
+    let mappedFormCols = 0;
+
+    p.dataA.headers.forEach(
+        (h, i) => {
+
+            if (
+                colHasData(
+                    p.dataA,
+                    i
+                )
+            ) {
+
+                activeFormCols++;
+
+                if (
+                    p.mapping.some(
+                        m =>
+                            m.targetType === 'source' &&
+                            m.targetVal === i
+                    )
+                ) {
+                    mappedFormCols++;
+                }
+            }
         }
-    });
-    const unmappedCPQCols = activeCPQCols - mappedCPQCols;
-    const totalUnmapped = unmappedFormCols + unmappedCPQCols;
-    // ==========================================
+    );
+
+
+    const unmappedFormCols =
+        activeFormCols -
+        mappedFormCols;
+
+
+    const ignoreCPQList = [
+        'adjusted quantity',
+        'layout1'
+    ];
+
+
+    let activeCPQCols = 0;
+    let mappedCPQCols = 0;
+
+
+    p.dataB.headers.forEach(
+        (h, i) => {
+
+            const cleanHeader =
+                String(
+                    h || ""
+                )
+                .toLowerCase()
+                .trim();
+
+
+            if (
+                !ignoreCPQList.includes(
+                    cleanHeader
+                ) &&
+                colHasData(
+                    p.dataB,
+                    i
+                )
+            ) {
+
+                activeCPQCols++;
+
+                if (
+                    p.mapping.some(
+                        m =>
+                            m.idxB === i
+                    )
+                ) {
+                    mappedCPQCols++;
+                }
+            }
+        }
+    );
+
+
+    const unmappedCPQCols =
+        activeCPQCols -
+        mappedCPQCols;
+
+
+    const totalUnmapped =
+        unmappedFormCols +
+        unmappedCPQCols;
+
+
+    // =========================================================
+    // UNMAPPED WARNING
+    // =========================================================
 
     let unmappedWarning = "";
-    if (totalUnmapped > 0) {
+
+
+    if (
+        totalUnmapped > 0
+    ) {
+
         unmappedWarning = `
-            <div style="background: #fee2e2; border: 1px solid #ef4444; border-left: 5px solid #b91c1c; padding: 12px 15px; border-radius: 6px; margin-bottom: 20px; text-align: left;">
-                <strong style="color: #b91c1c; font-size: 15px;"><i class="fas fa-exclamation-triangle"></i> Warning: Unmapped Columns Detected</strong>
-                <div style="color: #991b1b; font-size: 13px; margin-top: 5px;">
-                    You left <strong>${unmappedFormCols} active Form</strong> column(s) and <strong>${unmappedCPQCols} active CPQ</strong> column(s) unmapped.
+            <div style="
+                background:#fee2e2;
+                border:1px solid #ef4444;
+                border-left:5px solid #b91c1c;
+                padding:12px 15px;
+                border-radius:6px;
+                margin-bottom:20px;
+                text-align:left;
+            ">
+                <strong style="
+                    color:#b91c1c;
+                    font-size:15px;
+                ">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Warning: Unmapped Columns Detected
+                </strong>
+
+                <div style="
+                    color:#991b1b;
+                    font-size:13px;
+                    margin-top:5px;
+                ">
+                    You left
+                    <strong>${unmappedFormCols} active Form</strong>
+                    column(s) and
+                    <strong>${unmappedCPQCols} active CPQ</strong>
+                    column(s) unmapped.
                 </div>
             </div>
         `;
-        setTimeout(() => showToast(`⚠️ ${totalUnmapped} columns left unmapped!`), 600);
+
+        setTimeout(
+            () =>
+                showToast(
+                    `⚠️ ${totalUnmapped} columns left unmapped!`
+                ),
+            600
+        );
     }
 
-    if (stats.mismatches === 0) {
+
+    // =========================================================
+    // BUILD MISMATCH BREAKDOWN
+    // =========================================================
+
+    let mismatchColumns = [];
+
+
+    // =========================================================
+    // NORMAL MAPPED FIELD MISMATCHES
+    // =========================================================
+
+    p.mapping.forEach(
+        map => {
+
+            let colErrorCount = 0;
+
+            const totalRows =
+                p.dataA.body.length;
+
+
+            for (
+                let i = 0;
+                i < totalRows;
+                i++
+            ) {
+
+                let valA =
+                    map.targetType === 'matrix'
+                    ? (
+                        p.matrix.find(
+                            m =>
+                                m.key ===
+                                map.targetVal
+                        )?.val || ""
+                    )
+                    : (
+                        p.dataA.body[i]?.[
+                            map.targetVal
+                        ] || ""
+                    ).toString();
+
+
+                let valB =
+                    (
+                        p.dataB.body[i]?.[
+                            map.idxB
+                        ] || ""
+                    ).toString();
+
+
+                if (doTrim) {
+
+                    valA =
+                        valA.replace(
+                            /\s+/g,
+                            ''
+                        );
+
+                    valB =
+                        valB.replace(
+                            /\s+/g,
+                            ''
+                        );
+
+                } else {
+
+                    valA =
+                        valA.trim();
+
+                    valB =
+                        valB.trim();
+                }
+
+
+                const lowerName =
+                    String(
+                        map.name
+                    ).toLowerCase();
+
+
+                const isPrice =
+                    /price|cost|retail/i.test(
+                        lowerName
+                    );
+
+
+                const isQty =
+                    /qty|quantity/i.test(
+                        lowerName
+                    );
+
+
+                let equal = false;
+
+
+                if (isPrice) {
+
+                    equal =
+                        valA
+                        .toLowerCase()
+                        .replace(
+                            /[$,]/g,
+                            ''
+                        ) ===
+                        valB
+                        .toLowerCase()
+                        .replace(
+                            /[$,]/g,
+                            ''
+                        );
+
+                } else if (isQty) {
+
+                    equal =
+                        valA
+                        .toLowerCase()
+                        .replace(
+                            /[\,\s]/g,
+                            ''
+                        ) ===
+                        valB
+                        .toLowerCase()
+                        .replace(
+                            /[\,\s]/g,
+                            ''
+                        );
+
+                } else {
+
+                    equal =
+                        valA.toLowerCase() ===
+                        valB.toLowerCase();
+                }
+
+
+                if (!equal) {
+                    colErrorCount++;
+                }
+            }
+
+
+            if (
+                colErrorCount > 0
+            ) {
+
+                mismatchColumns.push({
+                    name: map.name,
+                    count: colErrorCount
+                });
+            }
+        }
+    );
+
+
+    // =========================================================
+    // MISSING CURRENCY
+    // =========================================================
+
+    const currIdxB =
+        p.dataB.headers.findIndex(
+            h =>
+                /currency/i.test(
+                    String(h)
+                )
+        );
+
+
+    let currencyMissingCount = 0;
+
+
+    if (
+        currIdxB !== -1
+    ) {
+
+        const priceMappings =
+            p.mapping.filter(
+                map =>
+                    /price|cost|retail/i.test(
+                        String(
+                            map.name
+                        ).toLowerCase()
+                    )
+            );
+
+
+        for (
+            let i = 0;
+            i < p.dataB.body.length;
+            i++
+        ) {
+
+            const currencyValue =
+                String(
+                    p.dataB.body[i]?.[
+                        currIdxB
+                    ] || ""
+                ).trim();
+
+
+            // Currency exists
+            if (
+                currencyValue !== ""
+            ) {
+                continue;
+            }
+
+
+            const hasValidPrice =
+                priceMappings.some(
+                    map => {
+
+                        const priceValue =
+                            String(
+                                p.dataB.body[i]?.[
+                                    map.idxB
+                                ] || ""
+                            );
+
+
+                        const num =
+                            parseFloat(
+                                priceValue.replace(
+                                    /[^0-9.-]/g,
+                                    ''
+                                )
+                            );
+
+
+                        return (
+                            !isNaN(num) &&
+                            num > 0
+                        );
+                    }
+                );
+
+
+            if (
+                hasValidPrice
+            ) {
+                currencyMissingCount++;
+            }
+        }
+    }
+
+
+    // =========================================================
+    // ADD CURRENCY AS SEPARATE COLUMN
+    // =========================================================
+
+    if (
+        currencyMissingCount > 0
+    ) {
+
+        mismatchColumns.push({
+            name: "Currency",
+            count: currencyMissingCount
+        });
+    }
+
+
+    // =========================================================
+    // NO MISMATCHES
+    // =========================================================
+
+    if (
+        stats.mismatches === 0
+    ) {
+
         const successHtml = `
             ${unmappedWarning}
-            <div style="text-align:center;">
-                <p style="font-size: 15px; margin-bottom: 20px; color: #374151;">
-                    All <strong>${p.dataA.body.length}</strong> rows match perfectly across all columns.
+
+            <div style="
+                text-align:center;
+            ">
+
+                <p style="
+                    font-size:15px;
+                    margin-bottom:20px;
+                    color:#374151;
+                ">
+                    All
+                    <strong>
+                        ${p.dataA.body.length}
+                    </strong>
+                    rows match perfectly across all columns.
                 </p>
-                <div style="background-color: #ecfdf5; color: #047857; padding: 15px; border-radius: 6px; font-weight: bold; border: 1px solid #a7f3d0; letter-spacing: 0.5px;">
+
+                <div style="
+                    background-color:#ecfdf5;
+                    color:#047857;
+                    padding:15px;
+                    border-radius:6px;
+                    font-weight:bold;
+                    border:1px solid #a7f3d0;
+                    letter-spacing:0.5px;
+                ">
                     NO MISMATCHES FOUND
                 </div>
+
             </div>
         `;
-        showModal(totalUnmapped > 0 ? "Analysis Complete (With Warnings)" : "Analysis Complete: Perfect Match!", successHtml, totalUnmapped > 0 ? 'warning' : 'success');
+
+
+        showModal(
+            totalUnmapped > 0
+                ? "Analysis Complete (With Warnings)"
+                : "Analysis Complete: Perfect Match!",
+            successHtml,
+            totalUnmapped > 0
+                ? 'warning'
+                : 'success'
+        );
+
         return;
     }
 
+
+    // =========================================================
+    // CREATE POPUP TABLE ROWS
+    // =========================================================
+
     let tableRows = "";
-    p.mapping.forEach(map => {
-        let colErrorCount = 0;
-        const totalRows = p.dataA.body.length;
 
-        for (let i = 0; i < totalRows; i++) {
-            let valA = map.targetType === 'matrix' ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") : (p.dataA.body[i]?.[map.targetVal] || "").toString();
-            let valB = (p.dataB.body[i]?.[map.idxB] || "").toString();
 
-            if (doTrim) { valA = valA.replace(/\s+/g, ''); valB = valB.replace(/\s+/g, ''); } 
-            else { valA = valA.trim(); valB = valB.trim(); }
+    mismatchColumns.forEach(
+        item => {
 
-            let normA = valA.toLowerCase(), normB = valB.toLowerCase(), equal = false;
-            if (/price|cost|retail/i.test(map.name.toLowerCase())) equal = (normA.replace(/[$,]/g, '') === normB.replace(/[$,]/g, ''));
-            else if (/qty|quantity/i.test(map.name.toLowerCase())) equal = (normA.replace(/[\,\s]/g, '') === normB.replace(/[\,\s]/g, ''));
-            else equal = (normA === normB);
+            tableRows += `
+                <tr>
+                    <td style="
+                        padding:10px;
+                        border-bottom:1px solid #f3f4f6;
+                        color:#374151;
+                    ">
+                        ${item.name}
+                    </td>
 
-            if (!equal) colErrorCount++;
+                    <td style="
+                        padding:10px;
+                        border-bottom:1px solid #f3f4f6;
+                        text-align:right;
+                        font-weight:bold;
+                        color:#ef4444;
+                    ">
+                        ${item.count}
+                    </td>
+                </tr>
+            `;
         }
+    );
 
-        if (colErrorCount > 0) {
-            tableRows += `<tr><td style="padding:10px; border-bottom:1px solid #f3f4f6; color:#374151;">${map.name}</td><td style="padding:10px; border-bottom:1px solid #f3f4f6; text-align:right; font-weight:bold; color:#ef4444;">${colErrorCount}</td></tr>`;
-        }
-    });
+
+    // =========================================================
+    // FINAL REPORT
+    // =========================================================
 
     const reportHtml = `
         ${unmappedWarning}
-        <div style="text-align:left;">
-            <p style="margin-bottom: 15px; font-size:15px; color:#374151;">Found <strong>${stats.mismatches}</strong> total mismatches in <strong>${p.dataA.body.length}</strong> rows.</p>
-            <div style="max-height: 300px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:6px;">
-                <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                    <thead style="position:sticky; top:0; background:#f9fafb;">
-                        <tr style="border-bottom:1px solid #e5e7eb; color:#b91c1c;">
-                            <th style="text-align:left; padding:10px; font-weight:600;">Column Name</th>
-                            <th style="text-align:right; padding:10px; font-weight:600;">Mismatches</th>
+
+        <div style="
+            text-align:left;
+        ">
+
+            <p style="
+                margin-bottom:15px;
+                font-size:15px;
+                color:#374151;
+            ">
+                Found
+                <strong>
+                    ${stats.mismatches}
+                </strong>
+                total mismatches in
+                <strong>
+                    ${p.dataA.body.length}
+                </strong>
+                rows.
+            </p>
+
+
+            <div style="
+                max-height:300px;
+                overflow-y:auto;
+                border:1px solid #e5e7eb;
+                border-radius:6px;
+            ">
+
+                <table style="
+                    width:100%;
+                    border-collapse:collapse;
+                    font-size:14px;
+                ">
+
+                    <thead style="
+                        position:sticky;
+                        top:0;
+                        background:#f9fafb;
+                    ">
+
+                        <tr style="
+                            border-bottom:1px solid #e5e7eb;
+                            color:#b91c1c;
+                        ">
+
+                            <th style="
+                                text-align:left;
+                                padding:10px;
+                                font-weight:600;
+                            ">
+                                Column Name
+                            </th>
+
+                            <th style="
+                                text-align:right;
+                                padding:10px;
+                                font-weight:600;
+                            ">
+                                Mismatches
+                            </th>
+
                         </tr>
+
                     </thead>
-                    <tbody>${tableRows}</tbody>
+
+
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+
                 </table>
+
             </div>
+
         </div>
     `;
 
-    showModal("Analysis Complete: Mismatches Found", reportHtml, 'error');
+
+    showModal(
+        "Analysis Complete: Mismatches Found",
+        reportHtml,
+        'error'
+    );
 }
 
 function toggleMismatchView() {
@@ -2463,106 +3740,315 @@ function renderResultTables(maxRows, doTrim) {
     const tB = document.getElementById('renderTableB'); 
     
     if (!p.dataA || !p.dataB) {
-        if(tA) tA.innerHTML = "<thead><tr><th>Form Data</th></tr></thead><tbody><tr><td style='color:#ccc; padding:20px; text-align:center;'>No Data Available</td></tr></tbody>";
-        if(tB) tB.innerHTML = "<thead><tr><th>Sainpase Data</th></tr></thead><tbody><tr><td style='color:#ccc; padding:20px; text-align:center;'>No Data Available</td></tr></tbody>";
+        if (tA) {
+            tA.innerHTML = "<thead><tr><th>Form Data</th></tr></thead><tbody><tr><td style='color:#ccc; padding:20px; text-align:center;'>No Data Available</td></tr></tbody>";
+        }
+
+        if (tB) {
+            tB.innerHTML = "<thead><tr><th>Sainpase Data</th></tr></thead><tbody><tr><td style='color:#ccc; padding:20px; text-align:center;'>No Data Available</td></tr></tbody>";
+        }
+
         return;
     }
 
-    let hA = "<thead><tr><th>#</th>" + p.dataA.headers.map(h=>`<th>${h}</th>`).join('') + "</tr></thead><tbody>"; 
-    let hB = "<thead><tr><th>#</th>" + p.dataB.headers.map(h=>`<th>${h}</th>`).join('') + "</tr></thead><tbody>"; 
+    let hA = "<thead><tr><th>#</th>" + 
+        p.dataA.headers.map(h => `<th>${h}</th>`).join('') + 
+        "</tr></thead><tbody>"; 
+
+    let hB = "<thead><tr><th>#</th>" + 
+        p.dataB.headers.map(h => `<th>${h}</th>`).join('') + 
+        "</tr></thead><tbody>"; 
     
     let bA = ""; 
     let bB = ""; 
     
+    // Create lookup for Table B / Sainapse columns mapped to Table A / Form
     const mapLookup = {}; 
-    p.mapping.forEach(m => mapLookup[m.idxB] = m); 
+
+    p.mapping.forEach(m => {
+        mapLookup[m.idxB] = m; 
+    }); 
     
+    // Create reverse lookup for Table A / Form columns
     const reverseLookup = {}; 
+
     p.mapping.forEach(m => { 
         if (m.targetType === 'source') { 
-            if (!reverseLookup[m.targetVal]) reverseLookup[m.targetVal] = []; 
+            if (!reverseLookup[m.targetVal]) {
+                reverseLookup[m.targetVal] = []; 
+            }
+
             reverseLookup[m.targetVal].push(m); 
         } 
     }); 
-    
+
+    // Find Currency column in Table B / Sainapse
+    const currIdxB = p.dataB.headers.findIndex(h => 
+        /currency/i.test(String(h))
+    );
+
+    // Compare two values
     function checkEqual(valA, valB, fieldName) {
-        let vA = doTrim ? valA.replace(/\s+/g, '') : valA.trim();
-        let vB = doTrim ? valB.replace(/\s+/g, '') : valB.trim();
+
+        let vA = doTrim 
+            ? valA.replace(/\s+/g, '') 
+            : valA.trim();
+
+        let vB = doTrim 
+            ? valB.replace(/\s+/g, '') 
+            : valB.trim();
+
         let normA = vA.toLowerCase();
         let normB = vB.toLowerCase(); 
         
         const lowerName = fieldName.toLowerCase();
+
         const isPrice = /price|cost|retail/i.test(lowerName);
         const isQty = /qty|quantity/i.test(lowerName); 
         
         if (isPrice) {
-            return (normA.replace(/[$,]/g,'') === normB.replace(/[$,]/g,'')); 
+
+            return (
+                normA.replace(/[$,]/g, '') === 
+                normB.replace(/[$,]/g, '')
+            ); 
+
         } else if (isQty) {
-            return (normA.replace(/[\,]/g,'') === normB.replace(/[\,]/g,'')); 
+
+            return (
+                normA.replace(/[\,]/g, '') === 
+                normB.replace(/[\,]/g, '')
+            ); 
+
         } else {
-            return (normA === normB); 
+
+            return normA === normB;
+
         }
     }
 
+    // Loop through rows
     for (let i = 0; i < maxRows; i++) { 
-        let rA = `<td>${i+1}</td>`; 
+
+        // =========================================================
+        // TABLE A / FORM DATA
+        // =========================================================
+
+        let rA = `<td>${i + 1}</td>`; 
         
         for (let cA = 0; cA < p.dataA.headers.length; cA++) { 
-            let rawA = (p.dataA.body[i]?.[cA] || "").toString();
+
+            let rawA = (
+                p.dataA.body[i]?.[cA] || ""
+            ).toString();
+
             let displayA = rawA;
             let cls = ""; 
             
+            // Check mapped Form columns
             if (reverseLookup[cA]) { 
+
                 let allMatch = true;
                 let comparedAgainst = ""; 
                 
                 reverseLookup[cA].forEach(map => { 
-                    let rawB = (p.dataB.body[i]?.[map.idxB] || "").toString(); 
+
+                    let rawB = (
+                        p.dataB.body[i]?.[map.idxB] || ""
+                    ).toString();
+
                     comparedAgainst = rawB; 
                     
                     if (!checkEqual(rawA, rawB, map.name)) {
                         allMatch = false; 
                     }
+
                 }); 
                 
-                cls = allMatch ? "match" : "diff"; 
-                if (!allMatch) {
-                    displayA = getVisualDiff(rawA, comparedAgainst);
+                // Matching value
+                if (allMatch) {
+
+                    cls = "match"; 
+
+                } else {
+
+                    // Mismatch
+                    cls = "diff"; 
+
+                    displayA = getVisualDiff(
+                        rawA, 
+                        comparedAgainst
+                    );
+
                 }
             } 
+            
             rA += `<td class="${cls}">${displayA}</td>`; 
         } 
         
-        let rB = `<td>${i+1}</td>`; 
+
+        // =========================================================
+        // TABLE B / SAINAPSE DATA
+        // =========================================================
+
+        let rB = `<td>${i + 1}</td>`; 
+
+        // Track if this row has a missing currency issue
+        let hasCurrencyErrorB = false;
+
         p.dataB.headers.forEach((_, colIdx) => { 
-            let rawB = (p.dataB.body[i]?.[colIdx] || "").toString();
+
+            let rawB = (
+                p.dataB.body[i]?.[colIdx] || ""
+            ).toString();
+
             let displayB = rawB;
             let cls = ""; 
             
+            // =====================================================
+            // NORMAL MAPPED FIELD VALIDATION
+            // =====================================================
+
             if (mapLookup.hasOwnProperty(colIdx)) { 
+
                 let map = mapLookup[colIdx];
+
                 let rawA = map.targetType === 'matrix' 
-                    ? (p.matrix.find(m => m.key === map.targetVal)?.val || "") 
-                    : (p.dataA.body[i]?.[map.targetVal] || "").toString(); 
+                    ? (
+                        p.matrix.find(
+                            m => m.key === map.targetVal
+                        )?.val || ""
+                    ) 
+                    : (
+                        p.dataA.body[i]?.[map.targetVal] || ""
+                    ).toString(); 
                 
+                // Values match
                 if (checkEqual(rawA, rawB, map.name)) {
+
                     cls = "match";
+
                 } else {
+
+                    // Values do not match
                     cls = "diff";
-                    displayB = getVisualDiff(rawB, rawA);
+
+                    displayB = getVisualDiff(
+                        rawB, 
+                        rawA
+                    );
+
                 }
             } 
+
+
+            // =====================================================
+            // MISSING CURRENCY VALIDATION
+            // =====================================================
+
+            // Check if current Table B column is a price-related field
+            const isPriceB = /price|retail/i.test(
+                String(p.dataB.headers[colIdx])
+            );
+
+            // Convert price value to number
+            // Examples:
+            // "$100"     -> 100
+            // "$1,000"   -> 1000
+            // "100 USD"  -> 100
+            const numB = parseFloat(
+                rawB.replace(/[^0-9.-]/g, '')
+            );
+
+            // Check if Currency is missing
+            const currMissingB = 
+                isPriceB &&
+                !isNaN(numB) &&
+                numB > 0 &&
+                (
+                    currIdxB === -1 ||
+                    String(
+                        p.dataB.body[i]?.[currIdxB] || ""
+                    ).trim() === ""
+                );
+
+
+            // =====================================================
+            // TREAT MISSING CURRENCY AS A MISMATCH
+            // =====================================================
+
+            if (currMissingB) {
+
+                // Important:
+                // Use "diff" class so mismatch counters
+                // count this as a mismatch.
+                cls = "diff";
+
+                // Add Missing Currency badge
+                displayB = `${displayB} 
+                    <span 
+                        class="diff-badge" 
+                        style="
+                            background:#ef4444; 
+                            color:white;
+                            padding:2px 6px;
+                            border-radius:4px;
+                            font-size:11px;
+                            font-weight:bold;
+                            margin-left:5px;
+                        "
+                    >
+                        Missing Currency
+                    </span>
+                `;
+
+                // Mark entire row as having currency issue
+                hasCurrencyErrorB = true;
+            }
+            
             rB += `<td class="${cls}">${displayB}</td>`; 
         }); 
 
-        const isRowError = rA.includes('class="diff"') || rB.includes('class="diff"');
-        const rowClass = isRowError ? "issue-row" : "perfect-row";
+
+        // =========================================================
+        // ROW MISMATCH / ISSUE DETECTION
+        // =========================================================
+
+        // A row is considered an issue if:
+        // 1. Table A contains a normal mismatch
+        // 2. Table B contains a normal mismatch
+        // 3. Currency is missing
+        const isRowError = 
+            rA.includes('class="diff"') || 
+            rB.includes('class="diff"') || 
+            hasCurrencyErrorB;
+
+        // Apply row class
+        const rowClass = isRowError 
+            ? "issue-row" 
+            : "perfect-row";
         
+
+        // Add rows to HTML
         bA += `<tr class="${rowClass}">${rA}</tr>`; 
-        bB += `<tr id="rowB-${i}" class="${rowClass}">${rB}</tr>`; 
+
+        bB += `
+            <tr 
+                id="rowB-${i}" 
+                class="${rowClass}"
+            >
+                ${rB}
+            </tr>
+        `; 
     } 
     
+
+    // =========================================================
+    // RENDER FINAL TABLES
+    // =========================================================
+
     tA.innerHTML = hA + bA + "</tbody>"; 
+
     tB.innerHTML = hB + bB + "</tbody>"; 
 }
 
