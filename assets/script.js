@@ -2098,7 +2098,7 @@ function autoMapProject(p) {
         
         if (["footsize", "dimension", "dimensions", "dims", "measurement", "width", "height", "length", "wxh", "lxw"].some(k => clean.includes(k))) return "DIMENSION_GROUP";
         if (["quantity", "totalqty", "qty", "billshipquantity", "shippedqty", "invqty", "orderquantity", "orderqty", "units", "count"].includes(clean)) return "QTY_GROUP";
-        if (["retailprice", "price", "retail", "retail1", "unitprice", "cost", "amount", "value"].includes(clean)) return "PRICE_GROUP";
+        if (["retailprice", "price", "retail", "retail1", "unitprice", "cost", "amount", "value", "msrp", "msrpoptional", "retailoptional"].includes(clean)) return "PRICE_GROUP";
         if (clean.includes("barcode") || ["upc", "gtin"].includes(clean)) return "BARCODE_GROUP";
         if (["productname", "itemname", "description", "desc", "shortdesc", "itemdesc"].includes(clean)) return "DESC_GROUP";
         if (["majorclass", "majclass", "class", "major", "category", "cat"].includes(clean)) return "CLASS_GROUP";
