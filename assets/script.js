@@ -841,6 +841,7 @@ function extractTableStrict(data, customKeyword = null) {
             rowStr.includes("disclaimer") || 
             rowStr.startsWith("note") || 
             rowStr.startsWith("remarks") || 
+            rowStr.includes("total order qty") ||
             rowStr.includes("images")) {
             break;
         }
@@ -1699,6 +1700,97 @@ function handleCPQUpload(input) {
     processNext(0); // start the sequential read
 }
 
+function checkRowsWithNoQuantity(data) {
+    if (!data || !Array.isArray(data.headers) || !Array.isArray(data.body)) {
+        return 0;
+    }
+
+    const qtyIndices = [];
+    const ignoreIndices = [];
+
+    // 1. Detect Qty columns AND structural columns (Action, #) aggressively
+    data.headers.forEach((header, index) => {
+        const rawHeader = String(header || "").trim();
+        const cleanHeader = rawHeader.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        if (/\b(qty|quantity|shipped|billed|units|pcs|order)\b/i.test(rawHeader)) {
+            qtyIndices.push(index);
+        } 
+        // Ignore blank headers (like # often is), action, slno, etc.
+        else if (cleanHeader === "" || cleanHeader === "action" || cleanHeader === "slno" || cleanHeader === "sno") {
+            ignoreIndices.push(index);
+        }
+    });
+
+    // If no quantity column found, return 0 warnings
+    if (qtyIndices.length === 0) {
+        return 0;
+    }
+
+    let count = 0;
+
+    // Helper to detect if a cell has ACTUAL visible data
+    const isRealData = (cell) => {
+        if (cell === undefined || cell === null) return false;
+        
+        let str = String(cell);
+        str = str.replace(/<[^>]*>?/gm, ''); // Strip HTML
+        str = str.replace(/&nbsp;/gi, ' ');  // Strip non-breaking spaces
+        str = str.replace(/[\u200B-\u200D\uFEFF\n\r\t]/g, ''); // Strip invisible/newline characters
+        str = str.trim();
+
+        if (str === "" || str === "-" || str.toLowerCase() === "n/a" || str.toLowerCase() === "nil") {
+            return false;
+        }
+        return true;
+    };
+
+    data.body.forEach((row) => {
+        if (!row || !Array.isArray(row)) return;
+
+        // 2. Ignore "Total" or summary rows at the bottom of the table
+        const rowString = row.join(" ").toLowerCase();
+        if (rowString.includes("total")) {
+            return;
+        }
+
+        // Check whether the row contains ANY meaningful data in VALID columns
+        const hasOtherData = row.some((cell, colIndex) => {
+            // Completely ignore Qty columns AND UI columns like "Action" or "#"
+            if (qtyIndices.includes(colIndex) || ignoreIndices.includes(colIndex)) {
+                return false; 
+            }
+            return isRealData(cell);
+        });
+
+        // Ignore rows that only have row numbers or are completely blank
+        if (!hasOtherData) return;
+
+        let hasValidQty = false;
+
+        qtyIndices.forEach(qtyIndex => {
+            if (hasValidQty) return;
+
+            const rawValue = String(row[qtyIndex] ?? "").trim().toLowerCase();
+            if (!rawValue) return;
+
+            const cleaned = rawValue.replace(/[, \s]/g, "").replace(/pcs/g, "");
+            const numValue = parseFloat(cleaned);
+
+            if (!isNaN(numValue) && numValue > 0) {
+                hasValidQty = true;
+            }
+        });
+
+        // Data exists but quantity is blank / zero / invalid
+        if (!hasValidQty) {
+            count++;
+        }
+    });
+
+    return count;
+}
+
 // ==========================================
 // STEP 1 -> STEP 2 (parse & clean)
 // ==========================================
@@ -1725,13 +1817,70 @@ function goToPreview() {
         p.rawA = inputA.value;
         p.rawB = inputB.value;
 
+        let noQtyRowsA = 0;
+        let noQtyRowsB = 0;
+
         if (changedA || !p.dataA) {
             p.dataA = parseExcelData(p.rawA, modeA);
-            if (p.dataA) autoCleanData(p.dataA);
+
+            if (p.dataA) {
+
+                // NEW: Check rows having data but no quantity
+                noQtyRowsA = checkRowsWithNoQuantity(p.dataA);
+
+                // Existing functionality - unchanged
+                autoCleanData(p.dataA);
+            }
         }
+
         if (changedB || !p.dataB) {
             p.dataB = parseExcelData(p.rawB, modeB);
-            if (p.dataB) autoCleanData(p.dataB);
+
+            if (p.dataB) {
+
+                // NEW: Check rows having data but no quantity
+                noQtyRowsB = checkRowsWithNoQuantity(p.dataB);
+
+                // Existing functionality - unchanged
+                autoCleanData(p.dataB);
+            }
+        }
+
+        // NEW: Show ONE popup for the total
+        const totalNoQtyRows =
+            noQtyRowsA + noQtyRowsB;
+
+        if (totalNoQtyRows > 0) {
+
+            let message =
+                `There are ${totalNoQtyRows} row(s) with no quantity but have data.`;
+
+            if (noQtyRowsA > 0 && noQtyRowsB > 0) {
+
+                message +=
+                    `<br><br>Table 1: ${noQtyRowsA} row(s)` +
+                    `<br>Table 2: ${noQtyRowsB} row(s)`;
+
+            } else if (noQtyRowsA > 0) {
+
+                message +=
+                    `<br><br>Table 1: ${noQtyRowsA} row(s)`;
+
+            } else if (noQtyRowsB > 0) {
+
+                message +=
+                    `<br><br>Table 2: ${noQtyRowsB} row(s)`;
+
+            }
+
+            message +=
+                `<br><br><strong>Please check the OM Notice once.</strong>`;
+
+            showModal(
+                "Quantity Check",
+                message,
+                'warning'
+            );
         }
 
         if (!p.dataA || !p.dataB) return showModal("Error Parsing", "Check input format.", 'error');
@@ -1742,6 +1891,7 @@ function goToPreview() {
         p.step = 2;
         renderTopBar();
         jumpToStep(2); // renders the Step 2 preview tables
+
     } catch (err) {
         showModal("System Error", err.message, 'error');
     }
