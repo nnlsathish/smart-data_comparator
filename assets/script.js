@@ -3997,29 +3997,32 @@ function openManualMapper(workbook, filename, targetSheetName = null) {
 // Renders a sheet as a raw, selectable grid in the manual selector, with the
 // smart/manual mode toolbar on top.
 function renderRawSheet(sheetName) {
-    currentSheetName = sheetName;
+  currentSheetName = sheetName;
 
-    // Clear any previous selection.
-    selectionStartRow = -1; selectionEndRow = -1;
-    selectionStartCol = -1; selectionEndCol = -1;
-    if (typeof updateManualButtonState === "function") updateManualButtonState();
+  // Clear any previous selection.
+  selectionStartRow = -1;
+  selectionEndRow = -1;
+  selectionStartCol = -1;
+  selectionEndCol = -1;
+  if (typeof updateManualButtonState === "function") updateManualButtonState();
 
-    const sheet = manualWorkbook.Sheets[sheetName];
-    const table = document.getElementById('manualRawTable');
-    const container = table.parentElement;
+  const sheet = manualWorkbook.Sheets[sheetName];
+  const table = document.getElementById("manualRawTable");
+  const container = table.parentElement;
 
-    // Build the sticky toolbar (once).
-    let toolbar = document.getElementById('manualToolbar');
-    if (!toolbar) {
-        toolbar = document.createElement('div');
-        toolbar.id = 'manualToolbar';
-        toolbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:12px 20px; border-bottom:1px solid #e2e8f0; width:100%; box-sizing:border-box; z-index:100; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);";
-        
-        const modalBody = container.parentElement;
-        modalBody.insertBefore(toolbar, container);
-    }
-    
-    toolbar.innerHTML = `
+  // Build the sticky toolbar (once).
+  let toolbar = document.getElementById("manualToolbar");
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.id = "manualToolbar";
+    toolbar.style.cssText =
+      "display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:12px 20px; border-bottom:1px solid #e2e8f0; width:100%; box-sizing:border-box; z-index:100; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);";
+
+    const modalBody = container.parentElement;
+    modalBody.insertBefore(toolbar, container);
+  }
+
+  toolbar.innerHTML = `
         <div style="display:flex; gap:15px; align-items:center;">
             <label style="font-size:12px; font-weight:bold; color:#334155; display:flex; align-items:center; gap:5px; cursor:pointer; background:white; padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
                 <input type="radio" name="manMode" value="smart" checked onchange="window.manualSelectMode='smart'"> ⚡ Smart Auto-Select
@@ -4032,46 +4035,60 @@ function renderRawSheet(sheetName) {
             <button onclick="addSelectionToMatrix()" style="background:#8b5cf6; color:white; border:none; padding:8px 16px; border-radius:6px; font-size:12px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(139,92,246,0.3); transition:all 0.2s;"><i class="fas fa-plus"></i> Add to Matrix Rules</button>
         </div>
     `;
-    
-    window.manualSelectMode = 'smart';
 
-    // Rebuild the grid (capped at 300 rows / 40 cols) from the sheet's cells.
-    table.innerHTML = "";
-    table.setAttribute('tabindex', '0');
-    table.style.outline = 'none';
+  window.manualSelectMode = "smart";
 
-    // New sheet -> reset undo/redo history and clear any stale selection.
-    excelHistory = [];
-    excelRedo = [];
-    excelSelStart = null;
-    excelSelEnd = null;
+  // Rebuild the grid (capped at 300 rows / 40 cols) from the sheet's cells.
+  table.innerHTML = "";
+  table.setAttribute("tabindex", "0");
+  table.style.outline = "none";
 
-    if (!sheet['!ref']) return;
-    const range = XLSX.utils.decode_range(sheet['!ref']);
-    const maxRows = Math.min(range.e.r, 300);
-    const maxCols = Math.min(range.e.c, 40);
+  // New sheet -> reset undo/redo history and clear any stale selection.
+  excelHistory = [];
+  excelRedo = [];
+  excelSelStart = null;
+  excelSelEnd = null;
 
-    for(let r = range.s.r; r <= maxRows; r++) {
-        const tr = document.createElement('tr');
+  if (!sheet["!ref"]) return;
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
+  const maxRows = Math.min(range.e.r, 300);
+  const maxCols = Math.min(range.e.c, 40);
 
-        // Sticky row-number cell on the left.
-        let html = `<td class="excel-idx" style="background:#f1f5f9; text-align:center; color:#888; font-size:10px; user-select:none; position:sticky; left:0; z-index:5;">${r+1}</td>`;
-        
-        for(let c = range.s.c; c <= maxCols; c++) {
-            const cellAddr = XLSX.utils.encode_cell({r, c});
-            const val = sheet[cellAddr] ? XLSX.utils.format_cell(sheet[cellAddr]) : "";
-            
-            html += `<td id="cell-${r}-${c}" 
+  for (let r = range.s.r; r <= maxRows; r++) {
+    // Skip rows explicitly hidden in Excel
+    const rMeta = sheet["!rows"] ? sheet["!rows"][r] : null;
+    const isHiddenRow = rMeta && (rMeta.hidden === true || rMeta.hidden === 1 || rMeta.hpx === 0 || rMeta.ht === 0);
+    if (isHiddenRow) continue;
+
+    const tr = document.createElement("tr");
+
+    // Sticky row-number cell on the left.
+    let html = `<td class="excel-idx" style="background:#f1f5f9; text-align:center; color:#888; font-size:10px; user-select:none; position:sticky; left:0; z-index:5;">${r + 1}</td>`;
+
+    for (let c = range.s.c; c <= maxCols; c++) {
+      // Skip columns explicitly hidden in Excel
+      const cMeta = sheet["!cols"] ? sheet["!cols"][c] : null;
+      const isHiddenCol = cMeta && (cMeta.hidden === true || cMeta.hidden === 1 || (cMeta.wpx != null && cMeta.wpx < 1) || (cMeta.width != null && cMeta.width < 0.1));
+      if (isHiddenCol) continue;
+
+      const cellAddr = XLSX.utils.encode_cell({ r, c });
+      const val = sheet[cellAddr]
+        ? XLSX.utils.format_cell(sheet[cellAddr])
+        : "";
+
+      html += `<td id="cell-${r}-${c}" 
                         data-r="${r}" data-c="${c}"
                         style="padding:6px; border:1px solid #e2e8f0; cursor:cell; min-width:50px; overflow:hidden; white-space:nowrap; max-width:200px; user-select: none;">
                         ${val}
                       </td>`;
-        }
-        tr.innerHTML = html;
-        table.appendChild(tr);
     }
+    tr.innerHTML = html;
+    table.appendChild(tr);
+  }
 
-    setTimeout(() => { enableExcelFeatures('manualRawTable'); }, 100);
+  setTimeout(() => {
+    enableExcelFeatures("manualRawTable");
+  }, 100);
 }
 
 
@@ -4258,60 +4275,70 @@ function updateManualButtonState() {
 // In batch mode each file becomes a new Set; otherwise the user is asked whether
 // to replace the active Set or create a new one.
 function confirmManualImport() {
-    if (selectionStartRow === -1) return;
+  if (selectionStartRow === -1) return;
 
-    try {
-        const sheet = manualWorkbook.Sheets[currentSheetName];
-        const rawData = extractSmartExcelData(sheet);
+  try {
+    const sheet = manualWorkbook.Sheets[currentSheetName];
+    const rawData = extractSmartExcelData(sheet);
 
-        // Slice out the selected rows/columns.
-        const rMin = Math.min(selectionStartRow, selectionEndRow);
-        const rMax = Math.max(selectionStartRow, selectionEndRow);
-        const cMin = Math.min(selectionStartCol, selectionEndCol);
-        const cMax = Math.max(selectionStartCol, selectionEndCol);
+    // Slice out the selected rows/columns.
+    const rMin = Math.min(selectionStartRow, selectionEndRow);
+    const rMax = Math.max(selectionStartRow, selectionEndRow);
+    const cMin = Math.min(selectionStartCol, selectionEndCol);
+    const cMax = Math.max(selectionStartCol, selectionEndCol);
 
-        let slicedData = [];
-        for (let r = rMin; r <= rMax; r++) {
-            let newRow = [];
-            const srcRow = rawData[r] || [];
-            for (let c = cMin; c <= cMax; c++) {
-                newRow.push(srcRow[c] || "");
-            }
-            slicedData.push(newRow);
-        }
+    let slicedData = [];
+    for (let r = rMin; r <= rMax; r++) {
+      // Ignore hidden rows during extraction
+      const rMeta = sheet["!rows"] ? sheet["!rows"][r] : null;
+      const isHiddenRow = rMeta && (rMeta.hidden === true || rMeta.hidden === 1 || rMeta.hpx === 0 || rMeta.ht === 0);
+      if (isHiddenRow) continue;
 
-        if (slicedData.length < 2) {
-            alert("Please select at least 2 rows (1 Header + 1 Data).");
-            return;
-        }
+      let newRow = [];
+      const srcRow = rawData[r] || [];
+      for (let c = cMin; c <= cMax; c++) {
+        // Ignore hidden columns during extraction
+        const cMeta = sheet["!cols"] ? sheet["!cols"][c] : null;
+        const isHiddenCol = cMeta && (cMeta.hidden === true || cMeta.hidden === 1 || (cMeta.wpx != null && cMeta.wpx < 1) || (cMeta.width != null && cMeta.width < 0.1));
+        if (isHiddenCol) continue;
 
-        const newRawData = arrayToTSV(slicedData);
-
-        // Batch mode: each queued file becomes its own new Set (no Replace/Create prompt).
-        if (manualBatchActive) {
-            applyManualNew(newRawData);
-            advanceManualQueue();
-            return;
-        }
-
-        // Otherwise apply to the tab the user is editing (or the active one).
-        let targetIdx = typeof editingProjectIndex !== 'undefined' && editingProjectIndex !== -1
-            ? editingProjectIndex
-            : activeProjectIdx;
-
-        if (targetIdx !== -1 && projects[targetIdx]) {
-            // Rename the tab to the selected sheet and ask replace-vs-new.
-            projects[targetIdx].name = currentSheetName;
-            showConflictModal(currentSheetName, targetIdx, newRawData);
-        } else {
-            // No active tab — just create a new Set.
-            applyManualNew(newRawData);
-        }
-
-    } catch (err) {
-        console.error(err);
-        alert("Error importing: " + err.message);
+        newRow.push(srcRow[c] || "");
+      }
+      slicedData.push(newRow);
     }
+
+    if (slicedData.length < 2) {
+      alert("Please select at least 2 rows (1 Header + 1 Data).");
+      return;
+    }
+
+    const newRawData = arrayToTSV(slicedData);
+
+    // Batch mode: each queued file becomes its own new Set (no Replace/Create prompt).
+    if (manualBatchActive) {
+      applyManualNew(newRawData);
+      advanceManualQueue();
+      return;
+    }
+
+    // Otherwise apply to the tab the user is editing (or the active one).
+    let targetIdx =
+      typeof editingProjectIndex !== "undefined" && editingProjectIndex !== -1
+        ? editingProjectIndex
+        : activeProjectIdx;
+
+    if (targetIdx !== -1 && projects[targetIdx]) {
+      // Rename the tab to the selected sheet and ask replace-vs-new.
+      projects[targetIdx].name = currentSheetName;
+      showConflictModal(currentSheetName, targetIdx, newRawData);
+    } else {
+      // No active tab — just create a new Set.
+      applyManualNew(newRawData);
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Error importing: " + err.message);
+  }
 }
 
 // Closes the manual selector. During a batch, "Skip / Close" advances to the next file.
